@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { Stack, router } from 'expo-router';
-import { View, ActivityIndicator } from 'react-native';
+import { Alert, View, ActivityIndicator } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import * as Linking from 'expo-linking';
 import Constants from 'expo-constants';
 import { initDb, getDb } from '../src/db/database';
 
@@ -32,7 +33,8 @@ async function initNotifications() {
 
   setNotificationHandler({
     handleNotification: async () => ({
-      shouldShowAlert: true,
+      shouldShowBanner: true,
+      shouldShowList: true,
       shouldPlaySound: true,
       shouldSetBadge: false,
     }),
@@ -51,14 +53,66 @@ export function consumePendingNotifRoute(): string | null {
   return r;
 }
 
+// Module-level store for a cold-start deep link (e.g. pillreminder://caregivers/incoming?d=...).
+// index.tsx calls consumePendingDeepLink() after auth to route the user.
+let _pendingDeepLink: string | null = null;
+export function consumePendingDeepLink(): string | null {
+  const r = _pendingDeepLink;
+  _pendingDeepLink = null;
+  return r;
+}
+
+function extractDeepLinkPath(url: string): string | null {
+  try {
+    const parsed = Linking.parse(url);
+    // parsed.path is e.g. "caregivers/incoming", params includes { d: '...' }
+    if (!parsed.path) return null;
+    const qs = parsed.queryParams
+      ? Object.entries(parsed.queryParams)
+          .map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`)
+          .join('&')
+      : '';
+    return qs ? `/${parsed.path}?${qs}` : `/${parsed.path}`;
+  } catch {
+    return null;
+  }
+}
+
 export default function RootLayout() {
   const [ready, setReady] = useState(false);
   const listenerRef = useRef<{ remove(): void } | null>(null);
+  const deepLinkListenerRef = useRef<{ remove(): void } | null>(null);
 
   useEffect(() => {
     async function init() {
       await initDb();
+      import('../src/services/rxnorm').then(({ enrichAllUnenriched }) =>
+        enrichAllUnenriched().catch(() => {})
+      );
       await initNotifications();
+
+      // Cold-start deep link: app was launched via a pillreminder:// URL.
+      const initialUrl = await Linking.getInitialURL();
+      if (initialUrl && initialUrl.startsWith('pillreminder://')) {
+        const path = extractDeepLinkPath(initialUrl);
+        if (path) _pendingDeepLink = path;
+      }
+
+      // Foreground deep link: app already running when the URL is opened.
+      deepLinkListenerRef.current = Linking.addEventListener('url', ({ url }) => {
+        if (!url.startsWith('pillreminder://')) return;
+        const path = extractDeepLinkPath(url);
+        if (!path) return;
+        // Show a non-interrupting confirmation so the user isn't yanked mid-form.
+        Alert.alert(
+          'Incoming message',
+          'A PillReminder link was received. Open it now?',
+          [
+            { text: 'Later', style: 'cancel' },
+            { text: 'Open', onPress: () => router.push(path as any) },
+          ],
+        );
+      });
 
       if (!isExpoGo) {
         const N = await import('expo-notifications');
@@ -89,6 +143,7 @@ export default function RootLayout() {
 
     return () => {
       listenerRef.current?.remove();
+      deepLinkListenerRef.current?.remove();
     };
   }, []);
 
@@ -111,10 +166,14 @@ export default function RootLayout() {
         <Stack.Screen name="entities/[id]/edit" />
         <Stack.Screen name="entities/[id]/schedule" />
         <Stack.Screen name="entities/[id]/medications/new" />
+        <Stack.Screen name="entities/[id]/medications/[medId]/index" />
         <Stack.Screen name="entities/[id]/medications/[medId]/edit" />
         <Stack.Screen name="entities/[id]/medications/[medId]/refill" />
         <Stack.Screen name="entities/[id]/medications/[medId]/history" />
         <Stack.Screen name="entities/[id]/compliance" />
+        <Stack.Screen name="caregivers/index" />
+        <Stack.Screen name="caregivers/shift/new" />
+        <Stack.Screen name="caregivers/incoming" />
         <Stack.Screen name="settings" />
       </Stack>
     </SafeAreaProvider>

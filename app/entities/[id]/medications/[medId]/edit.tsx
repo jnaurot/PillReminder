@@ -4,6 +4,7 @@ import { useLocalSearchParams, router } from 'expo-router';
 import { getMedication, updateMedication } from '../../../../../src/db/medications';
 import { getSettings } from '../../../../../src/db/settings';
 import { scheduleForMedication } from '../../../../../src/notifications/scheduler';
+import { enrichMedication } from '../../../../../src/services/rxnorm';
 import MedicationForm, { type MedicationFormData } from '../../../../../src/components/MedicationForm';
 import { parseSchedule, parseInteractions } from '../../../../../src/types';
 import type { Medication } from '../../../../../src/types';
@@ -27,6 +28,7 @@ export default function EditMedicationScreen() {
         await scheduleForMedication(updated, settings.missed_window_minutes);
       }
       router.back();
+      enrichMedication(medId, data.name, id).catch(() => {});
     } finally {
       setSaving(false);
     }

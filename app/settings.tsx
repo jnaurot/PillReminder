@@ -24,6 +24,7 @@ export default function SettingsScreen() {
   const [missedWindow, setMissedWindow] = useState('60');
   const [policy, setPolicy] = useState<AppSettings['global_missed_policy']>('none');
   const [refillAlertDays, setRefillAlertDays] = useState('7');
+  const [primaryPhone, setPrimaryPhone] = useState('');
 
   useEffect(() => {
     getSettings().then((s) => {
@@ -31,6 +32,7 @@ export default function SettingsScreen() {
       setMissedWindow(String(s.missed_window_minutes));
       setPolicy(s.global_missed_policy);
       setRefillAlertDays(String(s.refill_alert_days));
+      setPrimaryPhone(s.primary_phone);
       setLoading(false);
     });
   }, []);
@@ -48,6 +50,7 @@ export default function SettingsScreen() {
       setSetting('missed_window_minutes', String(mw)),
       setSetting('global_missed_policy', policy),
       setSetting('refill_alert_days', String(rd)),
+      setSetting('primary_phone', primaryPhone.replace(/\D/g, '')),
     ]);
     setSaving(false);
     Alert.alert('Saved', 'Default settings updated.');
@@ -115,7 +118,7 @@ export default function SettingsScreen() {
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Text style={styles.backText}>‹ Back</Text>
+          <Text style={styles.backText}> ‹ Back</Text>
         </TouchableOpacity>
         <Text style={styles.title}>App Defaults</Text>
         <TouchableOpacity onPress={handleSave} disabled={saving}>
@@ -190,6 +193,33 @@ export default function SettingsScreen() {
         </View>
 
         <View style={styles.field}>
+          <Text style={styles.label}>My Phone Number</Text>
+          <Text style={styles.hint}>
+            Your number is embedded in caregiver invites so the caregiver's app can send you
+            dose updates. Required for full deep-link invites.
+          </Text>
+          <TextInput
+            style={styles.input}
+            value={primaryPhone}
+            onChangeText={setPrimaryPhone}
+            placeholder="+1 555 000 0000"
+            placeholderTextColor="#CBD5E1"
+            keyboardType="phone-pad"
+          />
+        </View>
+
+        <View style={styles.field}>
+          <Text style={styles.label}>Caregivers</Text>
+          <TouchableOpacity style={styles.dataBtn} onPress={() => router.push('/caregivers')}>
+            <View style={styles.dataBtnInner}>
+              <Text style={styles.dataBtnTitle}>Caregiver Shifts</Text>
+              <Text style={styles.dataBtnDesc}>Assign and track active caregivers</Text>
+            </View>
+            <Text style={styles.dataBtnArrow}>›</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.field}>
           <Text style={styles.label}>Data</Text>
 
           <TouchableOpacity style={styles.dataBtn} onPress={handleExportCSV}>
@@ -230,7 +260,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16, paddingVertical: 14,
     backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E2E8F0',
   },
-  backBtn: { padding: 4 },
+  backBtn: { padding: 10 },
   backText: { fontSize: 16, color: '#4A90D9' },
   title: { fontSize: 17, fontWeight: '600', color: '#1A2F5A' },
   saveText: { fontSize: 16, color: '#4A90D9', fontWeight: '600' },

@@ -69,6 +69,28 @@ export interface Entity {
   deleted_at: string | null;
 }
 
+export interface DrugInfo {
+  why_prescribed: string | null;
+  how_to_take: string | null;
+  precautions: string | null;
+  dietary_instructions: string | null;
+  missed_dose: string | null;
+  side_effects: string | null;
+  storage_disposal: string | null;
+  source_name: string;
+  source_url: string;
+  fetched_at: string;
+}
+
+export interface PillImage {
+  url: string;
+  name: string;
+}
+
+export type PillAppearance =
+  | { type: 'image'; url: string; name: string }
+  | { type: 'none' };
+
 export interface Medication {
   id: string;
   entity_id: string;
@@ -82,6 +104,9 @@ export interface Medication {
   early_window_minutes: number | null;
   color: string;
   notes: string | null;
+  rxcui: string | null;
+  drug_info: string | null;        // JSON → DrugInfo
+  pill_appearance: string | null;  // JSON → PillAppearance
   created_at: string;
   updated_at: string;
   deleted_at: string | null;

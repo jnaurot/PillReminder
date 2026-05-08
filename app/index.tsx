@@ -3,11 +3,16 @@ import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { router } from 'expo-router';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { StatusBar } from 'expo-status-bar';
-import { consumePendingNotifRoute } from './_layout';
+import { consumePendingNotifRoute, consumePendingDeepLink } from './_layout';
 
 function navigateAfterAuth() {
   const notifRoute = consumePendingNotifRoute();
-  if (notifRoute) {
+  const deepLink = consumePendingDeepLink();
+
+  if (deepLink) {
+    // Deep link takes priority — go straight to the incoming screen.
+    router.replace(deepLink as any);
+  } else if (notifRoute) {
     router.replace('/today');
     // Push the notification target onto the stack after the replace settles.
     setTimeout(() => router.push(notifRoute as any), 100);

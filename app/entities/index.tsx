@@ -7,6 +7,7 @@ import { router, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getEntities, deleteEntity } from '../../src/db/entities';
 import { getDosesForDate, todayStr } from '../../src/db/doseLogs';
+import { getActiveShift, type ShiftWithCaregiver } from '../../src/db/caregivers';
 import type { Entity } from '../../src/types';
 
 function initials(name: string): string {
@@ -80,11 +81,13 @@ function EntityCard({
 export default function EntitiesScreen() {
   const [entities, setEntities] = useState<Entity[]>([]);
   const [statusMap, setStatusMap] = useState<Map<string, DoseStatus>>(new Map());
+  const [activeShift, setActiveShift] = useState<ShiftWithCaregiver | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
-    const rows = await getEntities();
+    const [rows, shift] = await Promise.all([getEntities(), getActiveShift()]);
     setEntities(rows);
+    setActiveShift(shift);
 
     const today = todayStr();
     const entries = await Promise.all(
@@ -116,6 +119,19 @@ export default function EntitiesScreen() {
           <Text style={styles.addButtonText}>+ Add</Text>
         </TouchableOpacity>
       </View>
+
+      {activeShift && activeShift.primary_phone === '' && (
+        <TouchableOpacity style={styles.caregiverBanner} onPress={() => router.push('/caregivers')}>
+          <Text style={styles.caregiverBannerText}>🤝 Active caregiver: {activeShift.caregiver.name}</Text>
+          <Text style={styles.caregiverBannerChevron}>›</Text>
+        </TouchableOpacity>
+      )}
+      {activeShift && activeShift.primary_phone !== '' && (
+        <TouchableOpacity style={styles.onShiftBanner} onPress={() => router.push('/caregivers')}>
+          <Text style={styles.caregiverBannerText}>🤝 You are on shift as caregiver</Text>
+          <Text style={styles.caregiverBannerChevron}>›</Text>
+        </TouchableOpacity>
+      )}
 
       {entities.length === 0 ? (
         <View style={styles.empty}>
@@ -183,4 +199,14 @@ const styles = StyleSheet.create({
   emptyIcon: { fontSize: 48 },
   emptyTitle: { fontSize: 18, fontWeight: '600', color: '#1A2F5A' },
   emptySub: { fontSize: 14, color: '#64748B', textAlign: 'center', paddingHorizontal: 40 },
+  caregiverBanner: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: '#14532D', paddingHorizontal: 20, paddingVertical: 10,
+  },
+  onShiftBanner: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: '#1E40AF', paddingHorizontal: 20, paddingVertical: 10,
+  },
+  caregiverBannerText: { fontSize: 13, fontWeight: '700', color: '#FFFFFF' },
+  caregiverBannerChevron: { fontSize: 20, color: '#86EFAC' },
 });

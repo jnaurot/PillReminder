@@ -64,7 +64,7 @@ export default function EditEntityScreen() {
       >
         <View style={styles.header}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-            <Text style={styles.backText}>‹ Cancel</Text>
+            <Text style={styles.backText}> ‹ Cancel</Text>
           </TouchableOpacity>
           <Text style={styles.title}>Edit Person</Text>
           <TouchableOpacity onPress={handleSave} disabled={saving}>
@@ -120,7 +120,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#E2E8F0',
   },
-  backBtn: { padding: 4 },
+  backBtn: { padding: 10 },
   backText: { fontSize: 16, color: '#4A90D9' },
   title: { fontSize: 17, fontWeight: '600', color: '#1A2F5A' },
   saveText: { fontSize: 16, color: '#4A90D9', fontWeight: '600' },

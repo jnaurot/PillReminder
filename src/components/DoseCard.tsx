@@ -8,9 +8,12 @@ import {
   deleteLog, updateLogNote, todayStr,
   type ScheduledDose, type DoseStatus,
 } from '../db/doseLogs';
-import { parseSchedule, parseInteractions } from '../types';
-import type { MedicationInteraction } from '../types';
+import type { DoseLog } from '../types/index';
+import { parseSchedule, parseInteractions } from '../types/index';
+import type { MedicationInteraction } from '../types/index';
 import { cancelMissedAlert } from '../notifications/scheduler';
+import { defaultTransport } from '../messaging/transport';
+import { MSG_VERSION } from '../messaging/types';
 
 export const STATUS_CONFIG: Record<DoseStatus, { label: string; bg: string; text: string }> = {
   locked:   { label: 'Scheduled', bg: '#F1F5F9', text: '#94A3B8' },
@@ -181,10 +184,12 @@ export function DoseCard({
   dose,
   allDoses,
   onAction,
+  isDelegated = false,
 }: {
   dose: ScheduledDose;
   allDoses: ScheduledDose[];
   onAction: () => void;
+  isDelegated?: boolean;
 }) {
   const [showNoteModal, setShowNoteModal] = useState(false);
   const [showPrnTakeModal, setShowPrnTakeModal] = useState(false);
@@ -276,7 +281,50 @@ export function DoseCard({
 
   async function executeTakePrn(note: string) {
     await logDoseTaken(dose.medication.id, null, undefined, note || undefined);
-    onAction();
+    await maybeSendDoseUpdate(new Date().toISOString(), false, note || null);
+  }
+
+  async function maybeSendDoseUpdate(
+    scheduledAt: string,
+    skipped: boolean,
+    note: string | null,
+  ) {
+    if (dose.shiftSource !== 'shared' || !dose.entityPrimaryPhone || !dose.sharedShiftId) {
+      onAction();
+      return;
+    }
+    Alert.alert(
+      'Notify primary caregiver?',
+      `Send a dose update for ${dose.medication.name} to the primary?`,
+      [
+        { text: 'Skip', style: 'cancel', onPress: onAction },
+        {
+          text: 'Send update',
+          onPress: async () => {
+            try {
+              await defaultTransport.send({
+                phone: dose.entityPrimaryPhone!,
+                humanText: `Dose logged: ${dose.medication.name}${note ? ` — ${note}` : ''}.`,
+                msg: {
+                  v: MSG_VERSION,
+                  type: 'DOSE_UPDATE',
+                  shiftId: dose.sharedShiftId!,
+                  entityId: dose.medication.entity_id,
+                  medicationId: dose.medication.id,
+                  scheduledAt,
+                  takenAt: skipped ? null : new Date().toISOString(),
+                  skipped,
+                  notes: note,
+                },
+              });
+            } catch (e: any) {
+              Alert.alert('SMS error', e?.message ?? 'Could not send update.');
+            }
+            onAction();
+          },
+        },
+      ],
+    );
   }
 
   async function executeTake() {
@@ -288,7 +336,7 @@ export function DoseCard({
     if (missed.length === 0 || policy === 'none') {
       await logDoseTaken(dose.medication.id, dose.scheduledAt);
       if (dose.scheduledAt) await cancelMissedAlert(dose.medication.id, dose.scheduledAt);
-      onAction();
+      await maybeSendDoseUpdate(dose.scheduledAt ?? new Date().toISOString(), false, null);
       return;
     }
 
@@ -309,7 +357,7 @@ export function DoseCard({
               );
               if (dose.scheduledAt) await cancelMissedAlert(dose.medication.id, dose.scheduledAt);
               if (missedDose.scheduledAt) await cancelMissedAlert(dose.medication.id, missedDose.scheduledAt);
-              onAction();
+              await maybeSendDoseUpdate(dose.scheduledAt ?? new Date().toISOString(), false, null);
             },
           },
         ],
@@ -331,7 +379,7 @@ export function DoseCard({
               await logDoseTaken(dose.medication.id, dose.scheduledAt);
               if (dose.scheduledAt) await cancelMissedAlert(dose.medication.id, dose.scheduledAt);
               if (missedDose.scheduledAt) await cancelMissedAlert(dose.medication.id, missedDose.scheduledAt);
-              onAction();
+              await maybeSendDoseUpdate(dose.scheduledAt ?? new Date().toISOString(), false, null);
             },
           },
         ],
@@ -352,7 +400,7 @@ export function DoseCard({
           onPress: async () => {
             await logDoseSkipped(dose.medication.id, dose.scheduledAt!);
             await cancelMissedAlert(dose.medication.id, dose.scheduledAt!);
-            onAction();
+            await maybeSendDoseUpdate(dose.scheduledAt!, true, null);
           },
         },
       ],
@@ -368,6 +416,7 @@ export function DoseCard({
           card.container,
           { borderLeftColor: dose.medication.color },
           locked && card.containerLocked,
+          isDelegated && card.containerDelegated,
         ]}
         onLongPress={settled ? handleLongPress : undefined}
         delayLongPress={400}
@@ -417,7 +466,9 @@ export function DoseCard({
           <Text style={card.longPressHint}>Hold to add note or undo</Text>
         )}
 
-        {!settled && !locked && (
+        {isDelegated ? (
+          <Text style={card.delegatedLabel}>🤝 Handled by caregiver</Text>
+        ) : !settled && !locked ? (
           <View style={card.actions}>
             <TouchableOpacity style={card.takeBtn} onPress={handleTake}>
               <Text style={card.takeBtnText}>✓  Take</Text>
@@ -428,7 +479,7 @@ export function DoseCard({
               </TouchableOpacity>
             )}
           </View>
-        )}
+        ) : null}
 
         {isPrn && dose.prnLogs && dose.prnLogs.length > 0 && (
           <View style={card.prnHistory}>
@@ -490,6 +541,8 @@ export const card = StyleSheet.create({
     shadowOpacity: 0.06, shadowRadius: 4, elevation: 2, gap: 6,
   },
   containerLocked: { backgroundColor: '#F8FAFC', opacity: 0.7 },
+  containerDelegated: { opacity: 0.6, backgroundColor: '#F8FAFC' },
+  delegatedLabel: { fontSize: 12, color: '#16A34A', fontWeight: '600', marginTop: 2 },
   topRow: { flexDirection: 'row', alignItems: 'flex-start' },
   medName: { fontSize: 16, fontWeight: '700', color: '#1A2F5A' },
   dosage:  { fontSize: 13, color: '#64748B', marginTop: 2 },

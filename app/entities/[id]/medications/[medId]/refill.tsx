@@ -8,17 +8,16 @@ import { useLocalSearchParams, router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getMedication } from '../../../../../src/db/medications';
 import { logRefill, getPrescriptions, deleteRefill, type Prescription } from '../../../../../src/db/prescriptions';
+import { todayStr } from '../../../../../src/db/doseLogs';
 import { getSettings } from '../../../../../src/db/settings';
+import { getDb } from '../../../../../src/db/database';
+import { defaultTransport } from '../../../../../src/messaging/transport';
+import { MSG_VERSION } from '../../../../../src/messaging/types';
 import DateInput from '../../../../../src/components/DateInput';
 import { parseSchedule, type Medication } from '../../../../../src/types';
 import { scheduleRefillAlert } from '../../../../../src/notifications/scheduler';
 
 const UNITS = ['pills', 'capsules', 'mL', 'mg', 'patches', 'injections', 'puffs', 'drops', 'tablets'];
-
-function todayStr(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
 
 function computeSuggestedDays(med: Medication, quantityStr: string): number | null {
   const qty = parseInt(quantityStr, 10);
@@ -104,6 +103,51 @@ export default function RefillScreen() {
       setDaysSupplyLocked(false);
       setRefillDate(todayStr());
       await reload();
+
+      // If this medication belongs to a shared entity, offer to notify the primary.
+      if (medication) {
+        const entityRow = await getDb().getFirstAsync<{
+          shift_source: string;
+          shared_shift_id: string | null;
+          primary_phone: string | null;
+        }>('SELECT shift_source, shared_shift_id, primary_phone FROM entities WHERE id = ?', [medication.entity_id]);
+
+        if (entityRow?.shift_source === 'shared' && entityRow.primary_phone && entityRow.shared_shift_id) {
+          const primaryPhone = entityRow.primary_phone;
+          const shiftId = entityRow.shared_shift_id;
+          Alert.alert(
+            'Notify primary caregiver?',
+            `Send a refill update for ${medication.name} to the primary?`,
+            [
+              { text: 'Skip', style: 'cancel' },
+              {
+                text: 'Send update',
+                onPress: async () => {
+                  try {
+                    await defaultTransport.send({
+                      phone: primaryPhone,
+                      humanText: `Refill logged: ${medication.name} — ${qty} ${unit}${ds ? `, ${ds}d supply` : ''}.`,
+                      msg: {
+                        v: MSG_VERSION,
+                        type: 'REFILL_UPDATE',
+                        shiftId,
+                        entityId: medication.entity_id,
+                        medicationId: medId,
+                        quantity: qty,
+                        refillDate: refillDate || todayStr(),
+                        daysSupply: ds ?? null,
+                        unit,
+                      },
+                    });
+                  } catch (e: any) {
+                    Alert.alert('SMS error', e?.message ?? 'Could not send update.');
+                  }
+                },
+              },
+            ],
+          );
+        }
+      }
     } catch (e: any) {
       Alert.alert('Save failed', e?.message ?? 'An unexpected error occurred.');
     } finally {
@@ -145,7 +189,7 @@ export default function RefillScreen() {
       >
         <View style={styles.header}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-            <Text style={styles.backText}>‹ Back</Text>
+            <Text style={styles.backText}> ‹ Back</Text>
           </TouchableOpacity>
           <Text style={styles.title} numberOfLines={1}>
             Refill — {medication?.name ?? ''}
@@ -272,7 +316,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16, paddingVertical: 14,
     backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E2E8F0',
   },
-  backBtn: { padding: 4 },
+  backBtn: { padding: 10 },
   backText: { fontSize: 16, color: '#4A90D9' },
   title: { flex: 1, fontSize: 16, fontWeight: '600', color: '#1A2F5A', textAlign: 'center', marginHorizontal: 8 },
   saveText: { fontSize: 16, color: '#4A90D9', fontWeight: '600' },

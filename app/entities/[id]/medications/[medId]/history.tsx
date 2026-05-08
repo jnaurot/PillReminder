@@ -1,183 +1,98 @@
 import { useCallback, useState } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity,
-  StyleSheet, ActivityIndicator,
+  View, Text, SectionList, TouchableOpacity,
+  StyleSheet, ActivityIndicator, Alert,
 } from 'react-native';
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getMedication } from '../../../../../src/db/medications';
-import { getRefillStatus, type RefillStatus } from '../../../../../src/db/prescriptions';
-import { getLogsForMedication } from '../../../../../src/db/doseLogs';
-import { getMedicationCompliance, type MedicationCompliance, type DayRecord } from '../../../../../src/db/compliance';
-import { getSettings } from '../../../../../src/db/settings';
-import { parseSchedule } from '../../../../../src/types';
-import type { Medication, DoseLog } from '../../../../../src/types';
+import { getLogsForMedication, deleteLog, updateLogNote } from '../../../../../src/db/doseLogs';
+import type { DoseLog, Medication } from '../../../../../src/types';
+import { dateToStr, nDaysAgo } from '../../../../../src/utils/dateTime';
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function toDateStr(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+function dateOnly(iso: string): string {
+  return iso.slice(0, 10);
 }
 
-function formatDateHeader(dateStr: string): string {
-  const today = toDateStr(new Date());
-  const yesterday = toDateStr(new Date(Date.now() - 86400000));
-  if (dateStr === today) return 'Today';
-  if (dateStr === yesterday) return 'Yesterday';
-  return new Date(dateStr + 'T00:00:00').toLocaleDateString([], {
-    weekday: 'short', month: 'short', day: 'numeric',
+function fmtDate(dateS: string): string {
+  return new Date(`${dateS}T12:00:00`).toLocaleDateString(undefined, {
+    weekday: 'short', month: 'short', day: 'numeric', year: 'numeric',
   });
 }
 
-function adherenceColor(pct: number | null): string {
-  if (pct === null) return '#94A3B8';
-  if (pct >= 90) return '#16A34A';
-  if (pct >= 70) return '#D97706';
-  return '#DC2626';
+function fmtTime(iso: string | null): string {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-function adherenceBg(pct: number | null): string {
-  if (pct === null) return '#F1F5F9';
-  if (pct >= 90) return '#F0FDF4';
-  if (pct >= 70) return '#FFFBEB';
-  return '#FEF2F2';
+interface LogSection {
+  title: string;
+  data: DoseLog[];
 }
 
-function offsetLabel(minutes: number | null): string {
-  if (minutes === null) return '—';
-  if (Math.abs(minutes) < 5) return 'On time';
-  return minutes < 0 ? `${Math.abs(minutes)} min early` : `${minutes} min late`;
-}
-
-function offsetColor(minutes: number | null): string {
-  if (minutes === null) return '#94A3B8';
-  if (Math.abs(minutes) < 5) return '#16A34A';
-  if (Math.abs(minutes) < 30) return '#D97706';
-  return '#DC2626';
-}
-
-// ─── 14-day dot grid ──────────────────────────────────────────────────────────
-
-function DotGrid({ days }: { days: DayRecord[] }) {
-  const last14 = days.slice(-14);
-  return (
-    <View style={dot.row}>
-      {last14.map((d) => {
-        let bg = '#E2E8F0';
-        if (d.scheduled > 0) {
-          if (d.missed > 0) bg = '#FCA5A5';
-          else if (d.skipped > 0) bg = '#FDE68A';
-          else if (d.taken === d.scheduled) bg = '#86EFAC';
-        }
-        return (
-          <View key={d.date} style={dot.cell}>
-            <View style={[dot.circle, { backgroundColor: bg }]} />
-            <Text style={dot.label}>{new Date(d.date + 'T00:00:00').getDate()}</Text>
-          </View>
-        );
-      })}
-    </View>
-  );
-}
-
-const dot = StyleSheet.create({
-  row: { flexDirection: 'row', flexWrap: 'wrap', gap: 4 },
-  cell: { alignItems: 'center', width: 20 },
-  circle: { width: 16, height: 16, borderRadius: 8 },
-  label: { fontSize: 9, color: '#94A3B8', marginTop: 2 },
-});
-
-// ─── Log row ──────────────────────────────────────────────────────────────────
-
-function LogRow({ log }: { log: DoseLog }) {
-  const scheduledTime = log.scheduled_at.slice(11, 16);
-  const takenTime = log.taken_at
-    ? new Date(log.taken_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    : null;
-
-  let statusLabel = log.is_catchup ? 'Catch-up' : 'Taken';
-  let statusBg   = log.is_catchup ? '#EFF6FF' : '#F0FDF4';
-  let statusColor = log.is_catchup ? '#2563EB' : '#16A34A';
-  if (log.skipped) { statusLabel = 'Skipped'; statusBg = '#FEF9C3'; statusColor = '#A16207'; }
-
-  return (
-    <View style={lr.row}>
-      <View style={{ flex: 1 }}>
-        <Text style={lr.time}>{scheduledTime}</Text>
-        {takenTime && !log.skipped && (
-          <Text style={lr.takenAt}>→ taken {takenTime}</Text>
-        )}
-        {log.notes ? <Text style={lr.notes} numberOfLines={2}>📝 {log.notes}</Text> : null}
-      </View>
-      <View style={[lr.badge, { backgroundColor: statusBg }]}>
-        <Text style={[lr.badgeText, { color: statusColor }]}>{statusLabel}</Text>
-      </View>
-    </View>
-  );
-}
-
-const lr = StyleSheet.create({
-  row: {
-    flexDirection: 'row', alignItems: 'flex-start',
-    backgroundColor: '#FFFFFF', borderRadius: 10,
-    padding: 12, gap: 10,
-  },
-  time: { fontSize: 15, fontWeight: '600', color: '#1A2F5A' },
-  takenAt: { fontSize: 12, color: '#16A34A', marginTop: 2 },
-  notes: { fontSize: 12, color: '#64748B', fontStyle: 'italic', marginTop: 3 },
-  badge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10, alignSelf: 'flex-start' },
-  badgeText: { fontSize: 12, fontWeight: '600' },
-});
-
-// ─── Screen ───────────────────────────────────────────────────────────────────
-
-export default function MedHistoryScreen() {
+export default function MedicationHistoryScreen() {
   const { id, medId } = useLocalSearchParams<{ id: string; medId: string }>();
   const [medication, setMedication] = useState<Medication | null>(null);
-  const [compliance, setCompliance] = useState<MedicationCompliance | null>(null);
-  const [refillStatus, setRefillStatus] = useState<RefillStatus | null>(null);
-  const [logGroups, setLogGroups] = useState<{ date: string; items: DoseLog[] }[]>([]);
+  const [sections, setSections] = useState<LogSection[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const load = useCallback(async () => {
-    const med = await getMedication(medId);
-    if (!med) return;
-
-    const today = new Date();
-    const fromDate = new Date(today);
-    fromDate.setDate(fromDate.getDate() - 89);
-    const fromStr = `${toDateStr(fromDate)}T00:00:00`;
-    const toStr   = `${toDateStr(today)}T23:59:59`;
-
-    const [comp, settings] = await Promise.all([
-      getMedicationCompliance(med),
-      getSettings(),
+  async function load() {
+    const today = dateToStr(nDaysAgo(0));
+    const from = dateToStr(nDaysAgo(89));
+    const [med, logs] = await Promise.all([
+      getMedication(medId),
+      getLogsForMedication(medId, `${from}T00:00:00`, `${today}T23:59:59`),
     ]);
-    const [refill, rawLogs] = await Promise.all([
-      getRefillStatus(medId, settings.refill_alert_days),
-      getLogsForMedication(medId, fromStr, toStr),
-    ]);
-
-    // Most recent first, grouped by date
-    const reversed = [...rawLogs].reverse();
-    const groups: { date: string; items: DoseLog[] }[] = [];
-    for (const log of reversed) {
-      const date = log.scheduled_at.slice(0, 10);
-      const last = groups[groups.length - 1];
-      if (!last || last.date !== date) groups.push({ date, items: [log] });
-      else last.items.push(log);
-    }
-
     setMedication(med);
-    setCompliance(comp);
-    setRefillStatus(refill);
-    setLogGroups(groups);
+
+    // Group by calendar date, newest first
+    const byDate = new Map<string, DoseLog[]>();
+    for (const log of [...logs].reverse()) {
+      const d = dateOnly(log.scheduled_at ?? log.created_at);
+      if (!byDate.has(d)) byDate.set(d, []);
+      byDate.get(d)!.push(log);
+    }
+    setSections(
+      [...byDate.entries()].map(([date, data]) => ({ title: fmtDate(date), data }))
+    );
     setLoading(false);
-  }, [medId]);
+  }
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  useFocusEffect(useCallback(() => { load(); }, [medId]));
 
-  if (loading || !medication || !compliance) {
+  function handleLongPress(log: DoseLog) {
+    const verb = log.skipped ? 'skipped' : 'taken';
+    Alert.alert(
+      `Dose ${verb}`,
+      `${fmtTime(log.taken_at ?? log.scheduled_at)}${log.notes ? `\n${log.notes}` : ''}`,
+      [
+        {
+          text: log.notes ? 'Edit note' : 'Add note',
+          onPress: () => {
+            Alert.prompt(
+              'Dose note',
+              'Enter a note for this dose:',
+              async (text) => { await updateLogNote(log.id, text?.trim() || null); load(); },
+              'plain-text',
+              log.notes ?? '',
+            );
+          },
+        },
+        {
+          text: 'Delete entry',
+          style: 'destructive',
+          onPress: () =>
+            Alert.alert('Delete log entry', 'Remove this dose record?', [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Delete', style: 'destructive', onPress: async () => { await deleteLog(log.id); load(); } },
+            ]),
+        },
+        { text: 'Cancel', style: 'cancel' },
+      ],
+    );
+  }
+
+  if (loading) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
         <ActivityIndicator color="#4A90D9" />
@@ -185,129 +100,64 @@ export default function MedHistoryScreen() {
     );
   }
 
-  const isPrn = parseSchedule(medication.schedule).type === 'prn';
-
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      {/* Header */}
+    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Text style={styles.backText}>‹</Text>
+          <Text style={styles.backText}> ‹ Back</Text>
         </TouchableOpacity>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.headerTitle} numberOfLines={1}>{medication.name}</Text>
-          <Text style={styles.headerSub}>{medication.dosage}</Text>
-        </View>
-        <TouchableOpacity onPress={() => router.push(`/entities/${id}/medications/${medId}/edit`)}>
-          <Text style={styles.editText}>Edit</Text>
-        </TouchableOpacity>
+        <Text style={styles.title} numberOfLines={1}>
+          {medication?.name ?? ''} — History
+        </Text>
+        <View style={{ width: 60 }} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scroll}>
-
-        {/* Supply card */}
-        {refillStatus ? (
-          <View style={styles.card}>
-            <View style={styles.cardHeader}>
-              <Text style={styles.cardTitle}>Supply</Text>
-              <TouchableOpacity onPress={() => router.push(`/entities/${id}/medications/${medId}/refill`)}>
-                <Text style={styles.linkText}>+ Log Refill</Text>
-              </TouchableOpacity>
-            </View>
-            <View style={styles.supplyRow}>
-              {refillStatus.daysRemaining !== null && (
-                <View style={[styles.supplyPill, refillStatus.isLow && styles.supplyPillLow]}>
-                  <Text style={[styles.supplyValue, refillStatus.isLow && styles.supplyValueLow]}>
-                    {refillStatus.daysRemaining <= 0 ? 'Empty' : `${refillStatus.daysRemaining}d`}
-                  </Text>
-                  <Text style={[styles.supplyLabel, refillStatus.isLow && styles.supplyLabelLow]}>remaining</Text>
-                </View>
-              )}
-              <View style={styles.supplyPill}>
-                <Text style={styles.supplyValue}>{Math.max(0, refillStatus.unitsRemaining ?? 0)}</Text>
-                <Text style={styles.supplyLabel}>{refillStatus.prescription.unit} left</Text>
-              </View>
-              <View style={styles.supplyPill}>
-                <Text style={styles.supplyValue}>{refillStatus.prescription.refill_date.slice(5)}</Text>
-                <Text style={styles.supplyLabel}>last filled</Text>
-              </View>
-            </View>
-          </View>
-        ) : (
-          <View style={[styles.card, styles.cardRow]}>
-            <Text style={styles.noRefillText}>No refill logged yet.</Text>
-            <TouchableOpacity onPress={() => router.push(`/entities/${id}/medications/${medId}/refill`)}>
-              <Text style={styles.linkText}>+ Log Refill</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* Adherence card */}
-        {!isPrn && (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Adherence</Text>
-            <View style={styles.rateRow}>
-              {([
-                { label: '7d',  val: compliance.adherence7 },
-                { label: '30d', val: compliance.adherence30 },
-                { label: '90d', val: compliance.adherence90 },
-              ] as const).map(({ label, val }) => (
-                <View key={label} style={[styles.ratePill, { backgroundColor: adherenceBg(val) }]}>
-                  <Text style={[styles.rateValue, { color: adherenceColor(val) }]}>
-                    {val !== null ? `${val}%` : '—'}
-                  </Text>
-                  <Text style={[styles.ratePeriod, { color: adherenceColor(val) }]}>{label}</Text>
-                </View>
-              ))}
-              {compliance.streak > 0 && (
-                <View style={styles.streakBadge}>
-                  <Text style={styles.streakText}>🔥 {compliance.streak}d streak</Text>
-                </View>
-              )}
-            </View>
-            <View style={styles.timingRow}>
-              <Text style={styles.timingLabel}>Avg timing  </Text>
-              <Text style={[styles.timingValue, { color: offsetColor(compliance.avgOffsetMinutes) }]}>
-                {offsetLabel(compliance.avgOffsetMinutes)}
-              </Text>
-            </View>
-            <Text style={styles.dotGridLabel}>Last 14 days</Text>
-            <DotGrid days={compliance.days} />
-            <View style={styles.legend}>
-              {[
-                { color: '#86EFAC', label: 'Taken' },
-                { color: '#FDE68A', label: 'Skipped' },
-                { color: '#FCA5A5', label: 'Missed' },
-              ].map(({ color, label }) => (
-                <View key={label} style={styles.legendItem}>
-                  <View style={[styles.legendDot, { backgroundColor: color }]} />
-                  <Text style={styles.legendText}>{label}</Text>
-                </View>
-              ))}
-            </View>
-          </View>
-        )}
-
-        {/* Dose log */}
-        <View style={styles.logSection}>
-          <Text style={styles.sectionTitle}>Dose Log  <Text style={styles.sectionSub}>last 90 days</Text></Text>
-          {logGroups.length === 0 ? (
-            <View style={styles.emptyLog}>
-              <Text style={styles.emptyLogText}>No doses logged yet.</Text>
-            </View>
-          ) : (
-            logGroups.map(({ date, items }) => (
-              <View key={date} style={styles.logGroup}>
-                <Text style={styles.dateHeader}>{formatDateHeader(date)}</Text>
-                <View style={styles.logRows}>
-                  {items.map((log) => <LogRow key={log.id} log={log} />)}
-                </View>
-              </View>
-            ))
-          )}
+      {sections.length === 0 ? (
+        <View style={styles.empty}>
+          <Text style={styles.emptyIcon}>📋</Text>
+          <Text style={styles.emptyTitle}>No history yet</Text>
+          <Text style={styles.emptySub}>Logged doses appear here (last 90 days).</Text>
         </View>
-
-      </ScrollView>
+      ) : (
+        <SectionList
+          sections={sections}
+          keyExtractor={(item) => item.id}
+          renderSectionHeader={({ section }) => (
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionDate}>{section.title}</Text>
+            </View>
+          )}
+          renderItem={({ item: log }) => {
+            const taken = !log.skipped;
+            return (
+              <TouchableOpacity
+                style={styles.logRow}
+                onLongPress={() => handleLongPress(log)}
+                delayLongPress={400}
+                activeOpacity={0.75}
+              >
+                <View style={[styles.dot, taken ? styles.dotTaken : styles.dotSkipped]} />
+                <View style={styles.logBody}>
+                  <Text style={styles.logStatus}>
+                    {taken ? 'Taken' : 'Skipped'}
+                    {log.is_catchup ? '  ·  catch-up' : ''}
+                  </Text>
+                  {log.taken_at && (
+                    <Text style={styles.logTime}>{fmtTime(log.taken_at)}</Text>
+                  )}
+                  {log.scheduled_at && (
+                    <Text style={styles.logScheduled}>Scheduled {fmtTime(log.scheduled_at)}</Text>
+                  )}
+                  {log.notes ? <Text style={styles.logNote}>📝 {log.notes}</Text> : null}
+                </View>
+                <Text style={styles.hint}>hold</Text>
+              </TouchableOpacity>
+            );
+          }}
+          contentContainerStyle={styles.list}
+          stickySectionHeadersEnabled
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -315,63 +165,38 @@ export default function MedHistoryScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F0F4FA' },
   header: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 12, paddingVertical: 14,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 16, paddingVertical: 14,
     backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E2E8F0',
   },
-  backBtn: { padding: 4, marginRight: 8 },
-  backText: { fontSize: 24, color: '#4A90D9', lineHeight: 28 },
-  headerTitle: { fontSize: 17, fontWeight: '700', color: '#1A2F5A' },
-  headerSub: { fontSize: 12, color: '#64748B', marginTop: 1 },
-  editText: { fontSize: 15, color: '#4A90D9', fontWeight: '600' },
-  scroll: { padding: 16, gap: 14 },
-
-  card: {
-    backgroundColor: '#FFFFFF', borderRadius: 14, padding: 16, gap: 10,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06, shadowRadius: 4, elevation: 2,
+  backBtn: { width: 60, padding: 10 },
+  backText: { fontSize: 16, color: '#4A90D9' },
+  title: { flex: 1, fontSize: 15, fontWeight: '600', color: '#1A2F5A', textAlign: 'center' },
+  list: { paddingBottom: 32 },
+  sectionHeader: {
+    backgroundColor: '#F0F4FA', paddingHorizontal: 16, paddingVertical: 8,
+    borderBottomWidth: 1, borderBottomColor: '#E2E8F0',
   },
-  cardRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  cardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  cardTitle: { fontSize: 13, fontWeight: '700', color: '#475569', textTransform: 'uppercase', letterSpacing: 0.5 },
-  linkText: { fontSize: 13, color: '#4A90D9', fontWeight: '600' },
-  noRefillText: { fontSize: 14, color: '#94A3B8' },
-
-  supplyRow: { flexDirection: 'row', gap: 10, flexWrap: 'wrap' },
-  supplyPill: {
-    backgroundColor: '#F1F5F9', borderRadius: 12,
-    paddingHorizontal: 14, paddingVertical: 8, alignItems: 'center', minWidth: 72,
+  sectionDate: {
+    fontSize: 12, fontWeight: '700', color: '#475569',
+    textTransform: 'uppercase', letterSpacing: 0.5,
   },
-  supplyPillLow: { backgroundColor: '#FEF2F2' },
-  supplyValue: { fontSize: 18, fontWeight: '700', color: '#1A2F5A' },
-  supplyValueLow: { color: '#DC2626' },
-  supplyLabel: { fontSize: 11, color: '#94A3B8', marginTop: 2 },
-  supplyLabelLow: { color: '#DC2626' },
-
-  rateRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
-  ratePill: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 10, alignItems: 'center', minWidth: 52 },
-  rateValue: { fontSize: 16, fontWeight: '700' },
-  ratePeriod: { fontSize: 10, fontWeight: '500', marginTop: 1 },
-  streakBadge: { backgroundColor: '#FFF7ED', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10 },
-  streakText: { fontSize: 12, fontWeight: '600', color: '#C2410C' },
-  timingRow: { flexDirection: 'row', alignItems: 'center' },
-  timingLabel: { fontSize: 12, color: '#64748B' },
-  timingValue: { fontSize: 12, fontWeight: '600' },
-  dotGridLabel: { fontSize: 11, color: '#94A3B8', fontWeight: '500' },
-  legend: { flexDirection: 'row', gap: 10, flexWrap: 'wrap' },
-  legendItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  legendDot: { width: 10, height: 10, borderRadius: 5 },
-  legendText: { fontSize: 10, color: '#94A3B8' },
-
-  logSection: { gap: 12 },
-  sectionTitle: { fontSize: 13, fontWeight: '700', color: '#475569', textTransform: 'uppercase', letterSpacing: 0.5 },
-  sectionSub: { fontSize: 11, fontWeight: '400', color: '#94A3B8', textTransform: 'none', letterSpacing: 0 },
-  emptyLog: { backgroundColor: '#FFFFFF', borderRadius: 12, padding: 20, alignItems: 'center' },
-  emptyLogText: { fontSize: 14, color: '#94A3B8' },
-  logGroup: { gap: 6 },
-  dateHeader: {
-    fontSize: 12, fontWeight: '700', color: '#64748B',
-    textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 2,
+  logRow: {
+    flexDirection: 'row', alignItems: 'flex-start',
+    backgroundColor: '#FFFFFF', paddingHorizontal: 16, paddingVertical: 12,
+    borderBottomWidth: 1, borderBottomColor: '#F1F5F9',
   },
-  logRows: { gap: 6 },
+  dot: { width: 10, height: 10, borderRadius: 5, marginTop: 4, marginRight: 12 },
+  dotTaken:   { backgroundColor: '#16A34A' },
+  dotSkipped: { backgroundColor: '#CA8A04' },
+  logBody: { flex: 1, gap: 2 },
+  logStatus:    { fontSize: 14, fontWeight: '600', color: '#1A2F5A' },
+  logTime:      { fontSize: 13, color: '#4A90D9' },
+  logScheduled: { fontSize: 12, color: '#94A3B8' },
+  logNote:      { fontSize: 12, color: '#64748B', fontStyle: 'italic', marginTop: 2 },
+  hint:         { fontSize: 10, color: '#CBD5E1', alignSelf: 'center' },
+  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, paddingHorizontal: 40 },
+  emptyIcon:  { fontSize: 48 },
+  emptyTitle: { fontSize: 18, fontWeight: '600', color: '#1A2F5A' },
+  emptySub:   { fontSize: 14, color: '#64748B', textAlign: 'center' },
 });

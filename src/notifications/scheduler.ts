@@ -3,6 +3,7 @@ import { getDb } from '../db/database';
 import { getSettings } from '../db/settings';
 import { parseSchedule } from '../types';
 import type { Medication } from '../types';
+import { dateToStr } from '../utils/dateTime';
 
 const isExpoGo = Constants.executionEnvironment === 'storeClient';
 
@@ -23,9 +24,6 @@ function remId(medId: string, slot: string)                        { return `rem
 function missId(medId: string, dateStr: string, timeHHmm: string)  { return `miss-${medId}-${dateStr}-${timeHHmm.replace(':', '')}`; }
 function refillId(medId: string)                                    { return `refill-${medId}`; }
 
-function formatDateStr(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
 function parseTime(time: string): { hour: number; minute: number } {
   const [h, m] = time.split(':').map(Number);
   return { hour: h, minute: m };
@@ -121,7 +119,7 @@ async function scheduleMissedAlertForDate(
   const missedTime = new Date(scheduledMs + missedWindowMin * 60000);
   if (missedTime <= new Date()) return;
 
-  const dateStr = formatDateStr(date);
+  const dateStr = dateToStr(date);
   await N.scheduleNotificationAsync({
     identifier: missId(med.id, dateStr, time),
     content: {
@@ -215,7 +213,7 @@ async function scheduleMonthly(N: N, med: Medication, days: number[], times: str
     for (const time of times) {
       const { hour, minute } = parseTime(time);
       for (const date of getNextMonthlyDates(dayOfMonth, 3)) {
-        const dateStr = formatDateStr(date);
+        const dateStr = dateToStr(date);
         const fireTime = new Date(date.getFullYear(), date.getMonth(), date.getDate(), hour, minute, 0);
         if (fireTime > new Date()) {
           await N.scheduleNotificationAsync({

@@ -1,17 +1,90 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
-  View, Text, FlatList, TouchableOpacity,
-  StyleSheet, Alert, ActivityIndicator,
+  View, Text, FlatList, TouchableOpacity, TextInput,
+  StyleSheet, Alert, ActivityIndicator, Modal, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getEntity, deleteEntity } from '../../../src/db/entities';
-import { getMedications, deleteMedication } from '../../../src/db/medications';
+import { getMedications, getDeletedMedications, deleteMedication, eraseAndDeleteMedication } from '../../../src/db/medications';
 import { getSettings } from '../../../src/db/settings';
 import { getRefillStatus, type RefillStatus } from '../../../src/db/prescriptions';
 import { cancelForMedication } from '../../../src/notifications/scheduler';
 import type { Entity, Medication, MedicationSchedule } from '../../../src/types';
 import { parseSchedule } from '../../../src/types';
+
+function ConfirmDeleteEntityModal({
+  visible,
+  entityName,
+  onConfirm,
+  onCancel,
+}: {
+  visible: boolean;
+  entityName: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const [text, setText] = useState('');
+  useEffect(() => { if (!visible) setText(''); }, [visible]);
+  const ready = text.trim().toLowerCase() === 'confirm';
+
+  return (
+    <Modal visible={visible} transparent animationType="fade">
+      <KeyboardAvoidingView
+        style={cm.backdrop}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <View style={cm.card}>
+          <Text style={cm.title}>Remove {entityName}?</Text>
+          <Text style={cm.body}>
+            This will permanently remove this person and all their medication history.{'\n\n'}
+            Type <Text style={cm.bold}>confirm</Text> to proceed.
+          </Text>
+          <TextInput
+            style={cm.input}
+            value={text}
+            onChangeText={setText}
+            placeholder="type confirm"
+            placeholderTextColor="#94A3B8"
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          <View style={cm.buttons}>
+            <TouchableOpacity style={cm.cancelBtn} onPress={onCancel}>
+              <Text style={cm.cancelText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[cm.deleteBtn, !ready && cm.deleteBtnDisabled]}
+              onPress={ready ? onConfirm : undefined}
+              disabled={!ready}
+            >
+              <Text style={cm.deleteBtnText}>Remove</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+const cm = StyleSheet.create({
+  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 24 },
+  card: { backgroundColor: '#FFF', borderRadius: 18, padding: 24, width: '100%', gap: 16 },
+  title: { fontSize: 17, fontWeight: '700', color: '#1A2F5A' },
+  body: { fontSize: 14, color: '#475569', lineHeight: 20 },
+  bold: { fontWeight: '700', color: '#1A2F5A' },
+  input: {
+    borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 10,
+    paddingHorizontal: 14, paddingVertical: 10,
+    fontSize: 15, color: '#1A2F5A',
+  },
+  buttons: { flexDirection: 'row', gap: 10 },
+  cancelBtn: { flex: 1, backgroundColor: '#F1F5F9', borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
+  cancelText: { fontSize: 15, fontWeight: '600', color: '#475569' },
+  deleteBtn: { flex: 1, backgroundColor: '#DC2626', borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
+  deleteBtnDisabled: { backgroundColor: '#FCA5A5' },
+  deleteBtnText: { fontSize: 15, fontWeight: '600', color: '#FFF' },
+});
 
 function formatScheduleSummary(scheduleJson: string): string {
   const schedule: MedicationSchedule = parseSchedule(scheduleJson);
@@ -71,11 +144,32 @@ function MedicationCard({
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Remove',
-          style: 'destructive',
           onPress: async () => {
             await deleteMedication(medication.id);
             await cancelForMedication(medication.id);
             onDelete();
+          },
+        },
+        {
+          text: 'Remove & Erase History',
+          style: 'destructive',
+          onPress: () => {
+            Alert.alert(
+              'Erase all history?',
+              `This will permanently delete all dosing history and refill records for "${medication.name}". This cannot be undone.`,
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Erase & Remove',
+                  style: 'destructive',
+                  onPress: async () => {
+                    await cancelForMedication(medication.id);
+                    await eraseAndDeleteMedication(medication.id);
+                    onDelete();
+                  },
+                },
+              ],
+            );
           },
         },
       ]
@@ -87,7 +181,7 @@ function MedicationCard({
       {/* Main tappable row → history screen */}
       <TouchableOpacity
         style={styles.medCardMain}
-        onPress={() => router.push(`/entities/${entityId}/medications/${medication.id}/history`)}
+        onPress={() => router.push(`/entities/${entityId}/medications/${medication.id}`)}
         onLongPress={confirmDelete}
         activeOpacity={0.7}
       >
@@ -105,10 +199,16 @@ function MedicationCard({
       {/* Footer row */}
       <View style={styles.medFooter}>
         <TouchableOpacity
+          onPress={() => router.push(`/entities/${entityId}/medications/${medication.id}/history`)}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Text style={styles.refillBtnText}>History</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
           onPress={() => router.push(`/entities/${entityId}/medications/${medication.id}/refill`)}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
-          <Text style={styles.refillBtnText}>+ Log Refill</Text>
+          <Text style={styles.refillBtnText}>+ Refill</Text>
         </TouchableOpacity>
         <View style={styles.medFooterRight}>
           {refillStatus && <RefillBadge status={refillStatus} />}
@@ -128,17 +228,22 @@ export default function EntityDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const [entity, setEntity] = useState<Entity | null>(null);
   const [medications, setMedications] = useState<Medication[]>([]);
+  const [deletedMeds, setDeletedMeds] = useState<Medication[]>([]);
+  const [showRemoved, setShowRemoved] = useState(false);
   const [refillMap, setRefillMap] = useState<Map<string, RefillStatus>>(new Map());
   const [loading, setLoading] = useState(true);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
 
   const load = useCallback(async () => {
-    const [e, meds, settings] = await Promise.all([
+    const [e, meds, removed, settings] = await Promise.all([
       getEntity(id),
       getMedications(id),
+      getDeletedMedications(id),
       getSettings(),
     ]);
     setEntity(e);
     setMedications(meds);
+    setDeletedMeds(removed);
 
     const entries = await Promise.all(
       meds.map(async (m) => {
@@ -160,22 +265,9 @@ export default function EntityDetailScreen() {
     }, [load])
   );
 
-  function confirmDeleteEntity() {
-    Alert.alert(
-      'Remove person',
-      `Remove "${entity?.name}" and all their medications?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Remove',
-          style: 'destructive',
-          onPress: async () => {
-            await deleteEntity(id);
-            router.replace('/entities');
-          },
-        },
-      ]
-    );
+  async function handleDeleteEntity() {
+    await deleteEntity(id);
+    router.replace('/entities');
   }
 
   if (loading) {
@@ -199,7 +291,7 @@ export default function EntityDetailScreen() {
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Text style={styles.backText}>‹</Text>
+          <Text style={styles.backText}> ‹</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>{entity.name}</Text>
         <TouchableOpacity onPress={() => router.push(`/entities/${id}/edit`)}>
@@ -237,7 +329,7 @@ export default function EntityDetailScreen() {
           {entity.dob ? <Text style={styles.infoSub}>DOB: {entity.dob}</Text> : null}
           {entity.notes ? <Text style={styles.infoNotes} numberOfLines={2}>{entity.notes}</Text> : null}
         </View>
-        <TouchableOpacity onPress={confirmDeleteEntity} style={styles.deleteBtn}>
+        <TouchableOpacity onPress={() => setShowDeleteModal(true)} style={styles.deleteBtn}>
           <Text style={styles.deleteText}>🗑</Text>
         </TouchableOpacity>
       </View>
@@ -253,27 +345,66 @@ export default function EntityDetailScreen() {
         </TouchableOpacity>
       </View>
 
-      {medications.length === 0 ? (
-        <View style={styles.empty}>
-          <Text style={styles.emptyIcon}>💊</Text>
-          <Text style={styles.emptyTitle}>No medications yet</Text>
-          <Text style={styles.emptySub}>Tap "+ Add" to add a medication</Text>
-        </View>
-      ) : (
-        <FlatList
-          data={medications}
-          keyExtractor={(m) => m.id}
-          renderItem={({ item }) => (
-            <MedicationCard
-              medication={item}
-              entityId={id}
-              refillStatus={refillMap.get(item.id) ?? null}
-              onDelete={load}
-            />
-          )}
-          contentContainerStyle={styles.list}
-        />
-      )}
+      <FlatList
+        data={medications}
+        keyExtractor={(m) => m.id}
+        renderItem={({ item }) => (
+          <MedicationCard
+            medication={item}
+            entityId={id}
+            refillStatus={refillMap.get(item.id) ?? null}
+            onDelete={load}
+          />
+        )}
+        contentContainerStyle={styles.list}
+        ListEmptyComponent={
+          <View style={styles.empty}>
+            <Text style={styles.emptyIcon}>💊</Text>
+            <Text style={styles.emptyTitle}>No medications yet</Text>
+            <Text style={styles.emptySub}>Tap "+ Add" to add a medication</Text>
+          </View>
+        }
+        ListFooterComponent={
+          deletedMeds.length > 0 ? (
+            <View style={styles.removedSection}>
+              <TouchableOpacity
+                style={styles.removedSectionHeader}
+                onPress={() => setShowRemoved((v) => !v)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.removedSectionTitle}>
+                  Removed medications ({deletedMeds.length})
+                </Text>
+                <Text style={styles.removedChevron}>{showRemoved ? '▲' : '▼'}</Text>
+              </TouchableOpacity>
+              {showRemoved && deletedMeds.map((m) => (
+                <TouchableOpacity
+                  key={m.id}
+                  style={styles.removedCard}
+                  onPress={() => router.push(`/entities/${id}/medications/${m.id}`)}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.medColorBar, { backgroundColor: m.color }]} />
+                  <View style={styles.removedBody}>
+                    <Text style={styles.removedName}>{m.name}</Text>
+                    <Text style={styles.removedSub}>
+                      {m.dosage}  ·  removed {m.deleted_at!.slice(0, 10)}
+                    </Text>
+                  </View>
+                  <Text style={styles.chevron}>›</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          ) : null
+        }
+      />
+
+      <ConfirmDeleteEntityModal
+        visible={showDeleteModal}
+        entityName={entity.name}
+        onConfirm={handleDeleteEntity}
+        onCancel={() => setShowDeleteModal(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -308,7 +439,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#E2E8F0',
   },
-  backBtn: { padding: 4, marginRight: 8 },
+  backBtn: { padding: 10, marginRight: 4 },
   backText: { fontSize: 24, color: '#4A90D9', lineHeight: 28 },
   headerTitle: { flex: 1, fontSize: 17, fontWeight: '600', color: '#1A2F5A' },
   editText: { fontSize: 16, color: '#4A90D9', fontWeight: '600' },
@@ -402,4 +533,21 @@ const styles = StyleSheet.create({
   emptyIcon: { fontSize: 40 },
   emptyTitle: { fontSize: 16, fontWeight: '600', color: '#1A2F5A' },
   emptySub: { fontSize: 13, color: '#64748B' },
+
+  removedSection: { marginTop: 20, marginBottom: 20 },
+  removedSectionHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 4, paddingVertical: 8,
+  },
+  removedSectionTitle: { fontSize: 13, fontWeight: '600', color: '#94A3B8' },
+  removedChevron: { fontSize: 12, color: '#94A3B8' },
+  removedCard: {
+    backgroundColor: '#FFF', borderRadius: 10, overflow: 'hidden',
+    flexDirection: 'row', alignItems: 'center',
+    opacity: 0.75, marginBottom: 6,
+    borderWidth: 1, borderColor: '#F1F5F9',
+  },
+  removedBody: { flex: 1, padding: 12, gap: 2 },
+  removedName: { fontSize: 14, fontWeight: '600', color: '#64748B' },
+  removedSub: { fontSize: 12, color: '#94A3B8' },
 });

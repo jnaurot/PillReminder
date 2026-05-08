@@ -4,16 +4,12 @@ import { getMedications } from './medications';
 import { getSettings } from './settings';
 import { parseSchedule } from '../types';
 import type { DoseLog, Medication, MedicationSchedule } from '../types';
+export { todayStr } from '../utils/dateTime';
 
 const uuidv4 = () => Crypto.randomUUID();
 
 function now(): string {
   return new Date().toISOString();
-}
-
-export function todayStr(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 function scheduledAt(dateStr: string, time: string): string {
@@ -54,6 +50,10 @@ export interface ScheduledDose {
   effectiveMissedWindow: number;
   effectiveMissedPolicy: 'none' | 'catch_up' | 'must_skip';
   prnLogs?: DoseLog[];
+  // Caregiver shift context — populated when entity has shift_source = 'shared'
+  shiftSource: string;
+  sharedShiftId: string | null;
+  entityPrimaryPhone: string | null;
 }
 
 // ─── Generate doses for an entity on a given date ─────────────────────────────
@@ -67,6 +67,15 @@ export async function getDosesForDate(
     getSettings(),
   ]);
   const db = getDb();
+
+  const entityRow = await db.getFirstAsync<{
+    shift_source: string;
+    shared_shift_id: string | null;
+    primary_phone: string | null;
+  }>('SELECT shift_source, shared_shift_id, primary_phone FROM entities WHERE id = ?', [entityId]);
+  const shiftSource = entityRow?.shift_source ?? 'local';
+  const sharedShiftId = entityRow?.shared_shift_id ?? null;
+  const entityPrimaryPhone = entityRow?.primary_phone ?? null;
 
   const logs = await db.getAllAsync<DoseLog>(
     `SELECT dl.* FROM dose_logs dl
@@ -112,6 +121,9 @@ export async function getDosesForDate(
         effectiveEarlyWindow: earlyWindow,
         effectiveMissedWindow: missedWindow,
         effectiveMissedPolicy: policy,
+        shiftSource,
+        sharedShiftId,
+        entityPrimaryPhone,
       };
     }
 
@@ -141,6 +153,9 @@ export async function getDosesForDate(
           effectiveMissedWindow: missedWindow,
           effectiveMissedPolicy: policy,
           prnLogs: todayPrnLogs.filter((l) => l.medication_id === med.id),
+          shiftSource,
+          sharedShiftId,
+          entityPrimaryPhone,
         });
         break;
       }
@@ -216,6 +231,9 @@ export async function getMissedDosesToday(
         effectiveEarlyWindow: earlyWindow,
         effectiveMissedWindow: missedWindow,
         effectiveMissedPolicy: 'none',
+        shiftSource: 'local',
+        sharedShiftId: null,
+        entityPrimaryPhone: null,
       });
     }
   }

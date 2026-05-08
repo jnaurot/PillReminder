@@ -5,6 +5,7 @@ export interface AppSettings {
   missed_window_minutes: number;
   global_missed_policy: 'none' | 'catch_up' | 'must_skip';
   refill_alert_days: number;
+  primary_phone: string;
 }
 
 const DEFAULTS: AppSettings = {
@@ -12,6 +13,7 @@ const DEFAULTS: AppSettings = {
   missed_window_minutes: 60,
   global_missed_policy: 'none',
   refill_alert_days: 7,
+  primary_phone: '',
 };
 
 export async function getSettings(): Promise<AppSettings> {
@@ -32,6 +34,7 @@ export async function getSettings(): Promise<AppSettings> {
     refill_alert_days: map.refill_alert_days
       ? parseInt(map.refill_alert_days, 10)
       : DEFAULTS.refill_alert_days,
+    primary_phone: map.primary_phone ?? DEFAULTS.primary_phone,
   };
 }
 

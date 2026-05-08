@@ -8,6 +8,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { getAllDosesForDate, todayStr, type ScheduledDose, type EntityDoses } from '../src/db/doseLogs';
 import { DoseCard } from '../src/components/DoseCard';
 import { setBadge } from '../src/notifications/scheduler';
+import { getActiveShift, type ShiftWithCaregiver } from '../src/db/caregivers';
 
 type Section = EntityDoses & { data: ScheduledDose[] };
 
@@ -17,13 +18,30 @@ function initials(name: string): string {
 
 export default function TodayScreen() {
   const [sections, setSections] = useState<Section[]>([]);
+  const [activeShift, setActiveShift] = useState<ShiftWithCaregiver | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const date = todayStr();
 
+  const [delegatedIds, setDelegatedIds] = useState<Set<string>>(new Set());
+
   const load = useCallback(async () => {
-    const all = await getAllDosesForDate(date);
+    const [all, shift] = await Promise.all([getAllDosesForDate(date), getActiveShift()]);
     setSections(all.map((e) => ({ ...e, data: e.doses })));
+    setActiveShift(shift);
+
+    // Build the set of entity IDs currently delegated to a caregiver.
+    if (shift) {
+      try {
+        const ids: string[] = JSON.parse(shift.entity_ids);
+        setDelegatedIds(ids.includes('*') ? new Set(all.map((e) => e.entityId)) : new Set(ids));
+      } catch {
+        setDelegatedIds(new Set());
+      }
+    } else {
+      setDelegatedIds(new Set());
+    }
+
     setLoading(false);
     const actionableCount = all.flatMap((e) => e.doses)
       .filter((d) => d.status === 'due' || d.status === 'missed').length;
@@ -70,6 +88,26 @@ export default function TodayScreen() {
         </TouchableOpacity>
       </View>
 
+      {/* Active caregiver banner — only shown on the primary's device */}
+      {activeShift && activeShift.primary_phone === '' && (
+        <TouchableOpacity style={styles.caregiverBanner} onPress={() => router.push('/caregivers')}>
+          <View>
+            <Text style={styles.caregiverBannerTitle}>🤝 Active caregiver: {activeShift.caregiver.name}</Text>
+            <Text style={styles.caregiverBannerSub}>
+              Until {new Date(activeShift.end_time).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+            </Text>
+          </View>
+          <Text style={styles.caregiverBannerChevron}>›</Text>
+        </TouchableOpacity>
+      )}
+      {/* On-shift banner — shown on the caregiver's device */}
+      {activeShift && activeShift.primary_phone !== '' && (
+        <TouchableOpacity style={styles.onShiftBanner} onPress={() => router.push('/caregivers')}>
+          <Text style={styles.caregiverBannerTitle}>🤝 You are on shift as caregiver</Text>
+          <Text style={styles.caregiverBannerChevron}>›</Text>
+        </TouchableOpacity>
+      )}
+
       {/* Summary banner */}
       {allDoses.length > 0 && (
         <View style={[
@@ -107,7 +145,6 @@ export default function TodayScreen() {
         <SectionList
           sections={sections}
           keyExtractor={(item) => item.key}
-          stale={false}
           renderSectionHeader={({ section }) => (
             <TouchableOpacity
               style={styles.sectionHeader}
@@ -122,7 +159,12 @@ export default function TodayScreen() {
             </TouchableOpacity>
           )}
           renderItem={({ item, section }) => (
-            <DoseCard dose={item} allDoses={section.doses} onAction={load} />
+            <DoseCard
+              dose={item}
+              allDoses={section.doses}
+              onAction={load}
+              isDelegated={delegatedIds.has(section.entityId)}
+            />
           )}
           contentContainerStyle={styles.list}
           SectionSeparatorComponent={() => <View style={{ height: 8 }} />}
@@ -182,4 +224,15 @@ const styles = StyleSheet.create({
     backgroundColor: '#4A90D9', borderRadius: 20,
   },
   emptyBtnText: { color: '#FFFFFF', fontWeight: '600', fontSize: 15 },
+  caregiverBanner: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: '#14532D', paddingHorizontal: 20, paddingVertical: 10,
+  },
+  caregiverBannerTitle: { fontSize: 13, fontWeight: '700', color: '#FFFFFF' },
+  caregiverBannerSub: { fontSize: 11, color: '#86EFAC', marginTop: 1 },
+  caregiverBannerChevron: { fontSize: 20, color: '#86EFAC' },
+  onShiftBanner: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: '#1E40AF', paddingHorizontal: 20, paddingVertical: 10,
+  },
 });

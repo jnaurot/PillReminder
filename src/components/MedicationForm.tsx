@@ -3,6 +3,7 @@ import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   ScrollView, Alert, KeyboardAvoidingView, Platform, Modal,
 } from 'react-native';
+import { MedicationNameInput } from './MedicationNameInput';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getMedications } from '../db/medications';
@@ -563,7 +564,7 @@ export default function MedicationForm({
         {/* Header */}
         <View style={s.header}>
           <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
-            <Text style={s.backText}>‹ Cancel</Text>
+            <Text style={s.backText}> ‹ Cancel</Text>
           </TouchableOpacity>
           <Text style={s.title}>{title}</Text>
           <TouchableOpacity onPress={handleSave} disabled={saving}>
@@ -574,10 +575,16 @@ export default function MedicationForm({
         <ScrollView contentContainerStyle={s.form} keyboardShouldPersistTaps="handled">
 
           {/* Name */}
-          <View style={s.field}>
+          <View style={[s.field, { zIndex: 10 }]}>
             <Text style={s.label}>Medication Name *</Text>
-            <TextInput style={s.input} value={name} onChangeText={setName}
-              placeholder="e.g. Metformin" placeholderTextColor="#94A3B8" autoFocus />
+            <MedicationNameInput
+              inputStyle={s.input}
+              value={name}
+              onChangeText={setName}
+              placeholder="e.g. Metformin"
+              placeholderTextColor="#94A3B8"
+              autoFocus
+            />
           </View>
 
           {/* Dosage */}
@@ -788,7 +795,7 @@ const s = StyleSheet.create({
     paddingHorizontal: 16, paddingVertical: 14,
     backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E2E8F0',
   },
-  backBtn: { padding: 4 },
+  backBtn: { padding: 10 },
   backText: { fontSize: 16, color: '#4A90D9' },
   title: { fontSize: 17, fontWeight: '600', color: '#1A2F5A' },
   saveText: { fontSize: 16, color: '#4A90D9', fontWeight: '600' },

@@ -22,7 +22,9 @@
         "backgroundColor": "#1A2F5A"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.bawlmorean.pillreminder",
+      "versionCode": 1
     },
     "web": {
       "favicon": "./assets/favicon.png"

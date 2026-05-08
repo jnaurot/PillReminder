@@ -1,6 +1,6 @@
 import * as SQLite from 'expo-sqlite';
 
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 8;
 
 let _db: SQLite.SQLiteDatabase | null = null;
 
@@ -17,7 +17,8 @@ export async function initDb(): Promise<void> {
   );
   const currentVersion = versionRow?.user_version ?? 0;
 
-  if (currentVersion < SCHEMA_VERSION) {
+  if (currentVersion < 6) {
+    // Breaking schema change before v6 — drop everything and start fresh.
     await _db.execAsync(`
       PRAGMA foreign_keys = OFF;
       DROP TABLE IF EXISTS dose_logs;
@@ -39,13 +40,16 @@ export async function initDb(): Promise<void> {
     );
 
     CREATE TABLE IF NOT EXISTS entities (
-      id          TEXT PRIMARY KEY,
-      name        TEXT NOT NULL,
-      dob         TEXT,
-      notes       TEXT,
-      created_at  TEXT NOT NULL,
-      updated_at  TEXT NOT NULL,
-      deleted_at  TEXT
+      id              TEXT PRIMARY KEY,
+      name            TEXT NOT NULL,
+      dob             TEXT,
+      notes           TEXT,
+      created_at      TEXT NOT NULL,
+      updated_at      TEXT NOT NULL,
+      deleted_at      TEXT,
+      shift_source    TEXT NOT NULL DEFAULT 'local',
+      shared_shift_id TEXT,
+      primary_phone   TEXT
     );
 
     CREATE TABLE IF NOT EXISTS medications (
@@ -86,9 +90,29 @@ export async function initDb(): Promise<void> {
       notes         TEXT,
       created_at    TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS caregivers (
+      id         TEXT PRIMARY KEY,
+      name       TEXT NOT NULL,
+      phone      TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS caregiver_shifts (
+      id                TEXT PRIMARY KEY,
+      caregiver_id      TEXT NOT NULL REFERENCES caregivers(id),
+      entity_ids        TEXT NOT NULL DEFAULT '["*"]',
+      start_time        TEXT NOT NULL,
+      end_time          TEXT NOT NULL,
+      status            TEXT NOT NULL DEFAULT 'pending',
+      confirmation_code TEXT NOT NULL,
+      notes             TEXT,
+      primary_phone     TEXT NOT NULL DEFAULT '',
+      created_at        TEXT NOT NULL
+    );
   `);
 
-  if (currentVersion < SCHEMA_VERSION) {
+  if (currentVersion < 6) {
     await _db.execAsync(`
       INSERT OR IGNORE INTO settings (key, value) VALUES
         ('early_window_minutes', '30'),
@@ -96,6 +120,25 @@ export async function initDb(): Promise<void> {
         ('global_missed_policy', 'none'),
         ('refill_alert_days', '7');
     `);
+  }
+
+  const addCol = async (table: string, col: string, def: string) => {
+    try {
+      await _db!.execAsync(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
+    } catch { /* column already exists */ }
+  };
+
+  if (currentVersion === 6) {
+    await addCol('entities', 'shift_source',    "TEXT NOT NULL DEFAULT 'local'");
+    await addCol('entities', 'shared_shift_id', 'TEXT');
+    await addCol('entities', 'primary_phone',   'TEXT');
+    await addCol('caregiver_shifts', 'primary_phone', "TEXT NOT NULL DEFAULT ''");
+  }
+
+  if (currentVersion < 8) {
+    await addCol('medications', 'rxcui',          'TEXT');
+    await addCol('medications', 'drug_info',       'TEXT');
+    await addCol('medications', 'pill_appearance', 'TEXT');
   }
 
   await _db.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION}`);
