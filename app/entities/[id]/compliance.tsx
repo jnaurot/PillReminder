@@ -12,7 +12,7 @@ import { parseSchedule } from '../../../src/types';
 import type { Entity, Medication } from '../../../src/types';
 import { dateToStr as dateStr, nDaysAgo } from '../../../src/utils/dateTime';
 
-function scheduledSlotsInPeriod(med: Medication, from: Date, to: Date): number {
+function scheduledSlotsInPeriod(med: Medication, from: Date, to: Date, cutoff: Date): number {
   const schedule = parseSchedule(med.schedule);
   if (schedule.type === 'prn') return 0;
 
@@ -21,17 +21,27 @@ function scheduledSlotsInPeriod(med: Medication, from: Date, to: Date): number {
   while (cur <= to) {
     const dow = cur.getDay();
     const dom = cur.getDate();
+    const isToday = cur.getFullYear() === cutoff.getFullYear() &&
+                    cur.getMonth()    === cutoff.getMonth() &&
+                    cur.getDate()     === cutoff.getDate();
+
+    let times: string[] = [];
     switch (schedule.type) {
-      case 'fixed_times':
-        count += schedule.times.length;
-        break;
-      case 'weekly':
-        if (schedule.days.includes(dow)) count += schedule.times.length;
-        break;
-      case 'monthly':
-        if (schedule.days.includes(dom)) count += schedule.times.length;
-        break;
+      case 'fixed_times': times = schedule.times; break;
+      case 'weekly':  if (schedule.days.includes(dow)) times = schedule.times; break;
+      case 'monthly': if (schedule.days.includes(dom)) times = schedule.times; break;
     }
+
+    if (isToday) {
+      for (const t of times) {
+        const [h, m] = t.split(':').map(Number);
+        const slotTime = new Date(cur.getFullYear(), cur.getMonth(), cur.getDate(), h, m, 0);
+        if (slotTime <= cutoff) count++;
+      }
+    } else {
+      count += times.length;
+    }
+
     cur.setDate(cur.getDate() + 1);
   }
   return count;
@@ -63,6 +73,7 @@ export default function ComplianceScreen() {
   async function load(idx: number) {
     setLoading(true);
     const { days } = WINDOWS[idx];
+    const now = new Date();
     const from = nDaysAgo(days);
     const to = new Date();
     to.setHours(23, 59, 59, 999);
@@ -92,7 +103,7 @@ export default function ComplianceScreen() {
           return { medication: med, isPrn: true, scheduled: 0, taken, skipped, missed: 0, pct: null };
         }
 
-        const scheduled = scheduledSlotsInPeriod(med, effectiveFrom, to);
+        const scheduled = scheduledSlotsInPeriod(med, effectiveFrom, to, now);
         const missed = Math.max(0, scheduled - taken - skipped);
         const pct = scheduled > 0 ? Math.round((taken / scheduled) * 100) : null;
         return { medication: med, isPrn: false, scheduled, taken, skipped, missed, pct };
