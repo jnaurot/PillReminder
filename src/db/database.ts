@@ -1,6 +1,6 @@
 import * as SQLite from 'expo-sqlite';
 
-const SCHEMA_VERSION = 8;
+const SCHEMA_VERSION = 9;
 
 let _db: SQLite.SQLiteDatabase | null = null;
 
@@ -118,7 +118,19 @@ export async function initDb(): Promise<void> {
         ('early_window_minutes', '30'),
         ('missed_window_minutes', '60'),
         ('global_missed_policy', 'none'),
-        ('refill_alert_days', '7');
+        ('refill_alert_days', '7'),
+        ('alarm_enabled', 'false'),
+        ('alarm_delay_minutes', '30'),
+        ('alarm_type', 'sound,vibration');
+    `);
+  }
+
+  if (currentVersion >= 6 && currentVersion < 9) {
+    await _db.execAsync(`
+      INSERT OR IGNORE INTO settings (key, value) VALUES
+        ('alarm_enabled', 'false'),
+        ('alarm_delay_minutes', '30'),
+        ('alarm_type', 'sound,vibration');
     `);
   }
 

@@ -6,6 +6,9 @@ export interface AppSettings {
   global_missed_policy: 'none' | 'catch_up' | 'must_skip';
   refill_alert_days: number;
   primary_phone: string;
+  alarm_enabled: boolean;
+  alarm_delay_minutes: number;
+  alarm_type: string; // comma-separated: 'sound', 'vibration'
 }
 
 const DEFAULTS: AppSettings = {
@@ -14,6 +17,9 @@ const DEFAULTS: AppSettings = {
   global_missed_policy: 'none',
   refill_alert_days: 7,
   primary_phone: '',
+  alarm_enabled: false,
+  alarm_delay_minutes: 30,
+  alarm_type: 'sound,vibration',
 };
 
 export async function getSettings(): Promise<AppSettings> {
@@ -35,6 +41,11 @@ export async function getSettings(): Promise<AppSettings> {
       ? parseInt(map.refill_alert_days, 10)
       : DEFAULTS.refill_alert_days,
     primary_phone: map.primary_phone ?? DEFAULTS.primary_phone,
+    alarm_enabled: map.alarm_enabled === 'true',
+    alarm_delay_minutes: map.alarm_delay_minutes
+      ? parseInt(map.alarm_delay_minutes, 10)
+      : DEFAULTS.alarm_delay_minutes,
+    alarm_type: map.alarm_type ?? DEFAULTS.alarm_type,
   };
 }
 

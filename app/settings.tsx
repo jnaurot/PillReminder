@@ -25,6 +25,9 @@ export default function SettingsScreen() {
   const [policy, setPolicy] = useState<AppSettings['global_missed_policy']>('none');
   const [refillAlertDays, setRefillAlertDays] = useState('7');
   const [primaryPhone, setPrimaryPhone] = useState('');
+  const [alarmEnabled, setAlarmEnabled] = useState(false);
+  const [alarmDelay, setAlarmDelay] = useState('30');
+  const [alarmType, setAlarmType] = useState('sound,vibration');
 
   useEffect(() => {
     getSettings().then((s) => {
@@ -33,6 +36,9 @@ export default function SettingsScreen() {
       setPolicy(s.global_missed_policy);
       setRefillAlertDays(String(s.refill_alert_days));
       setPrimaryPhone(s.primary_phone);
+      setAlarmEnabled(s.alarm_enabled);
+      setAlarmDelay(String(s.alarm_delay_minutes));
+      setAlarmType(s.alarm_type);
       setLoading(false);
     });
   }, []);
@@ -41,9 +47,11 @@ export default function SettingsScreen() {
     const ew = parseInt(earlyWindow, 10);
     const mw = parseInt(missedWindow, 10);
     const rd = parseInt(refillAlertDays, 10);
+    const ad = parseInt(alarmDelay, 10);
     if (isNaN(ew) || ew < 1) { Alert.alert('Early window must be at least 1 minute.'); return; }
     if (isNaN(mw) || mw < 1) { Alert.alert('Missed window must be at least 1 minute.'); return; }
     if (isNaN(rd) || rd < 1) { Alert.alert('Refill alert must be at least 1 day.'); return; }
+    if (alarmEnabled && (isNaN(ad) || ad < 1)) { Alert.alert('Alarm delay must be at least 1 minute.'); return; }
     setSaving(true);
     await Promise.all([
       setSetting('early_window_minutes', String(ew)),
@@ -51,7 +59,11 @@ export default function SettingsScreen() {
       setSetting('global_missed_policy', policy),
       setSetting('refill_alert_days', String(rd)),
       setSetting('primary_phone', primaryPhone.replace(/\D/g, '')),
+      setSetting('alarm_enabled', String(alarmEnabled)),
+      setSetting('alarm_delay_minutes', String(ad)),
+      setSetting('alarm_type', alarmType || 'sound,vibration'),
     ]);
+    await rescheduleAll();
     setSaving(false);
     Alert.alert('Saved', 'Default settings updated.');
   }
@@ -168,6 +180,66 @@ export default function SettingsScreen() {
             />
             <View style={styles.unit}><Text style={styles.unitText}>days</Text></View>
           </View>
+        </View>
+
+        <View style={styles.field}>
+          <Text style={styles.label}>Missed Dose Alarm</Text>
+          <Text style={styles.hint}>Sound a high-priority alarm if a dose is still not logged after a set delay.</Text>
+          <TouchableOpacity
+            style={[styles.policyOption, alarmEnabled && styles.policyOptionActive]}
+            onPress={() => setAlarmEnabled(!alarmEnabled)}
+          >
+            <View style={[styles.radioCircle, alarmEnabled && styles.radioCircleActive]}>
+              {alarmEnabled && <View style={styles.radioDot} />}
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.policyLabel, alarmEnabled && styles.policyLabelActive]}>
+                {alarmEnabled ? 'Alarm enabled' : 'Alarm disabled'}
+              </Text>
+            </View>
+          </TouchableOpacity>
+
+          {alarmEnabled && (
+            <>
+              <Text style={styles.hint}>Minutes after the dose is missed before the alarm fires.</Text>
+              <View style={styles.row}>
+                <TextInput
+                  style={[styles.input, { flex: 1 }]}
+                  value={alarmDelay}
+                  onChangeText={setAlarmDelay}
+                  keyboardType="numeric"
+                />
+                <View style={styles.unit}><Text style={styles.unitText}>min</Text></View>
+              </View>
+
+              <Text style={styles.hint}>Alarm type:</Text>
+              <View style={styles.gap8}>
+                {([['sound', 'Sound (ringtone)'], ['vibration', 'Vibration']] as const).map(([key, label]) => {
+                  const active = alarmType.split(',').map((s) => s.trim()).includes(key);
+                  return (
+                    <TouchableOpacity
+                      key={key}
+                      style={[styles.policyOption, active && styles.policyOptionActive]}
+                      onPress={() => {
+                        const types = alarmType.split(',').map((s) => s.trim()).filter(Boolean);
+                        setAlarmType(
+                          active
+                            ? types.filter((t) => t !== key).join(',')
+                            : [...types, key].join(',')
+                        );
+                      }}
+                    >
+                      <View style={[styles.radioCircle, active && styles.radioCircleActive]}>
+                        {active && <View style={styles.radioDot} />}
+                      </View>
+                      <Text style={[styles.policyLabel, active && styles.policyLabelActive]}>{label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+              <Text style={styles.hint}>LED lights flash automatically on supported Android devices.</Text>
+            </>
+          )}
         </View>
 
         <View style={styles.field}>

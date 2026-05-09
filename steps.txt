@@ -1,0 +1,27 @@
+❯ list the steps to run a dev build on phone; list the steps to run a production build on the phone                                               
+
+● Dev build (local, on-device)
+
+  1. Enable USB debugging on your phone (Settings → Developer Options → USB Debugging)
+  2. Plug phone in via USB
+  3. Accept the "Allow USB debugging?" prompt on the phone
+  4. source ~/.bashrc
+  5. cd ~/Projects/PillReminder && ./node_modules/.bin/expo run:android
+  6. Accept any install prompts on the phone
+
+  ---
+  Production build (EAS cloud → install on phone)
+
+  1. npm install -g eas-cli
+  2. eas login
+  3. eas build --profile production --platform android (builds in Expo's cloud, takes ~15 min)
+  4. Download the .aab or .apk from the link EAS gives you
+  5. Install on phone:
+    - If .apk: enable "Install from unknown sources" on phone, then open the file
+    - If .aab: must be submitted to Play Store — use eas submit instead
+
+  For a production .apk you can sideload directly, add this to eas.json under the production profile:
+  "buildType": "apk"
+  
+✻ Cooked for 7s
+

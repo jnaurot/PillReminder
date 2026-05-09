@@ -18,10 +18,12 @@ async function getN(): Promise<N | null> {
 // ─── Notification ID scheme ───────────────────────────────────────────────────
 //   rem-{medId}-{slot}            → repeating reminder
 //   miss-{medId}-{dateStr}-{HHmm} → one-time missed alert
+//   alarm-{medId}-{dateStr}-{HHmm}→ one-time high-priority alarm
 //   refill-{medId}                → one-time refill reminder
 
 function remId(medId: string, slot: string)                        { return `rem-${medId}-${slot}`; }
 function missId(medId: string, dateStr: string, timeHHmm: string)  { return `miss-${medId}-${dateStr}-${timeHHmm.replace(':', '')}`; }
+function alarmId(medId: string, dateStr: string, timeHHmm: string) { return `alarm-${medId}-${dateStr}-${timeHHmm.replace(':', '')}`; }
 function refillId(medId: string)                                    { return `refill-${medId}`; }
 
 function parseTime(time: string): { hour: number; minute: number } {
@@ -41,6 +43,7 @@ export async function cancelForMedication(medId: string): Promise<void> {
         .filter((n) =>
           n.identifier.startsWith(`rem-${medId}-`) ||
           n.identifier.startsWith(`miss-${medId}-`) ||
+          n.identifier.startsWith(`alarm-${medId}-`) ||
           n.identifier === refillId(medId)
         )
         .map((n) => N.cancelScheduledNotificationAsync(n.identifier))
@@ -135,9 +138,49 @@ async function scheduleMissedAlertForDate(
   });
 }
 
+// ─── Schedule one alarm for a specific date + time ───────────────────────────
+
+async function scheduleAlarmForDate(
+  N: N,
+  med: Medication,
+  date: Date,
+  time: string,
+  delayMin: number,
+  alarmType: string,
+): Promise<void> {
+  const { hour, minute } = parseTime(time);
+  const scheduledMs = new Date(
+    date.getFullYear(), date.getMonth(), date.getDate(), hour, minute, 0
+  ).getTime();
+  const alarmTime = new Date(scheduledMs + delayMin * 60000);
+  if (alarmTime <= new Date()) return;
+
+  const dateStr = dateToStr(date);
+  const types = alarmType.split(',').map((s) => s.trim());
+  await N.scheduleNotificationAsync({
+    identifier: alarmId(med.id, dateStr, time),
+    content: {
+      title: `Missed dose: ${med.name}`,
+      body: `${time} dose has not been logged. Tap to open PillReminder.`,
+      sound: types.includes('sound'),
+      vibrationPattern: types.includes('vibration') ? [0, 500, 200, 500] : [0],
+      priority: 'max',
+      channelId: 'dose-alarm',
+      data: { medId: med.id, scheduledAt: `${dateStr}T${time}:00`, type: 'alarm' },
+    },
+    trigger: {
+      type: N.SchedulableTriggerInputTypes.DATE,
+      date: alarmTime,
+    },
+  });
+}
+
 // ─── Schedule fixed-times (daily repeating) ───────────────────────────────────
 
-async function scheduleFixedTimes(N: N, med: Medication, times: string[], missedWindowMin: number): Promise<void> {
+async function scheduleFixedTimes(
+  N: N, med: Medication, times: string[], missedWindowMin: number,
+  alarm?: { delayMin: number; type: string },
+): Promise<void> {
   const now = new Date();
   for (const time of times) {
     const { hour, minute } = parseTime(time);
@@ -155,13 +198,17 @@ async function scheduleFixedTimes(N: N, med: Medication, times: string[], missed
       const d = new Date(now);
       d.setDate(d.getDate() + i);
       await scheduleMissedAlertForDate(N, med, d, time, missedWindowMin);
+      if (alarm) await scheduleAlarmForDate(N, med, d, time, alarm.delayMin, alarm.type);
     }
   }
 }
 
 // ─── Schedule weekly ──────────────────────────────────────────────────────────
 
-async function scheduleWeekly(N: N, med: Medication, days: number[], times: string[], missedWindowMin: number): Promise<void> {
+async function scheduleWeekly(
+  N: N, med: Medication, days: number[], times: string[], missedWindowMin: number,
+  alarm?: { delayMin: number; type: string },
+): Promise<void> {
   const now = new Date();
   for (const jsWeekday of days) {
     for (const time of times) {
@@ -186,6 +233,7 @@ async function scheduleWeekly(N: N, med: Medication, days: number[], times: stri
         d.setDate(d.getDate() + i);
         if (d.getDay() === jsWeekday) {
           await scheduleMissedAlertForDate(N, med, d, time, missedWindowMin);
+          if (alarm) await scheduleAlarmForDate(N, med, d, time, alarm.delayMin, alarm.type);
         }
       }
     }
@@ -208,7 +256,10 @@ function getNextMonthlyDates(dayOfMonth: number, count: number): Date[] {
   return results;
 }
 
-async function scheduleMonthly(N: N, med: Medication, days: number[], times: string[], missedWindowMin: number): Promise<void> {
+async function scheduleMonthly(
+  N: N, med: Medication, days: number[], times: string[], missedWindowMin: number,
+  alarm?: { delayMin: number; type: string },
+): Promise<void> {
   for (const dayOfMonth of days) {
     for (const time of times) {
       const { hour, minute } = parseTime(time);
@@ -228,6 +279,7 @@ async function scheduleMonthly(N: N, med: Medication, days: number[], times: str
           });
         }
         await scheduleMissedAlertForDate(N, med, date, time, missedWindowMin);
+        if (alarm) await scheduleAlarmForDate(N, med, date, time, alarm.delayMin, alarm.type);
       }
     }
   }
@@ -235,16 +287,20 @@ async function scheduleMonthly(N: N, med: Medication, days: number[], times: str
 
 // ─── Main: schedule all notifications for one medication ─────────────────────
 
-export async function scheduleForMedication(med: Medication, missedWindowMin: number): Promise<void> {
+export async function scheduleForMedication(
+  med: Medication,
+  missedWindowMin: number,
+  alarm?: { delayMin: number; type: string },
+): Promise<void> {
   const N = await getN();
   if (!N) return;
   await cancelForMedication(med.id);
   const schedule = parseSchedule(med.schedule);
   try {
     switch (schedule.type) {
-      case 'fixed_times': await scheduleFixedTimes(N, med, schedule.times, missedWindowMin); break;
-      case 'weekly':      await scheduleWeekly(N, med, schedule.days, schedule.times, missedWindowMin); break;
-      case 'monthly':     await scheduleMonthly(N, med, schedule.days, schedule.times, missedWindowMin); break;
+      case 'fixed_times': await scheduleFixedTimes(N, med, schedule.times, missedWindowMin, alarm); break;
+      case 'weekly':      await scheduleWeekly(N, med, schedule.days, schedule.times, missedWindowMin, alarm); break;
+      case 'monthly':     await scheduleMonthly(N, med, schedule.days, schedule.times, missedWindowMin, alarm); break;
       case 'prn':         break;
     }
   } catch {}
@@ -270,8 +326,11 @@ export async function rescheduleAll(): Promise<void> {
     const db = getDb();
     const meds = await db.getAllAsync<Medication>(`SELECT * FROM medications WHERE deleted_at IS NULL`);
     const settings = await getSettings();
+    const alarm = settings.alarm_enabled
+      ? { delayMin: settings.alarm_delay_minutes, type: settings.alarm_type }
+      : undefined;
     for (const med of meds) {
-      await scheduleForMedication(med, settings.missed_window_minutes);
+      await scheduleForMedication(med, settings.missed_window_minutes, alarm);
       // Restore refill alert if this medication has a recent prescription with days_supply
       const rx = await db.getFirstAsync<{ refill_date: string; days_supply: number | null }>(
         `SELECT refill_date, days_supply FROM prescriptions
