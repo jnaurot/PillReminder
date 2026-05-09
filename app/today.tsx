@@ -80,12 +80,17 @@ export default function TodayScreen() {
           <Text style={styles.headerTitle}>Today</Text>
           <Text style={styles.headerDate}>{dateLabel}</Text>
         </View>
-        <TouchableOpacity
-          style={styles.peopleBtn}
-          onPress={() => router.push('/entities')}
-        >
-          <Text style={styles.peopleBtnText}>People ›</Text>
-        </TouchableOpacity>
+        <View style={styles.headerRight}>
+          <TouchableOpacity
+            style={styles.peopleBtn}
+            onPress={() => router.push('/entities')}
+          >
+            <Text style={styles.peopleBtnText}>People ›</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => router.push('/settings')} style={styles.settingsBtn}>
+            <Text style={styles.settingsText}>⚙</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Active caregiver banner — only shown on the primary's device */}
@@ -184,11 +189,14 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontSize: 22, fontWeight: '700', color: '#1A2F5A' },
   headerDate:  { fontSize: 12, color: '#94A3B8', marginTop: 1 },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   peopleBtn: {
     paddingHorizontal: 14, paddingVertical: 7,
     backgroundColor: '#F1F5F9', borderRadius: 16,
   },
   peopleBtnText: { fontSize: 13, fontWeight: '600', color: '#4A90D9' },
+  settingsBtn: { padding: 4 },
+  settingsText: { fontSize: 22, color: '#4A90D9' },
   summaryBanner: {
     backgroundColor: '#FFF7ED',
     paddingHorizontal: 20, paddingVertical: 10,

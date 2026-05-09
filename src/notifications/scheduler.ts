@@ -157,15 +157,20 @@ async function scheduleAlarmForDate(
 
   const dateStr = dateToStr(date);
   const types = alarmType.split(',').map((s) => s.trim());
+  const hasSound = types.includes('sound');
+  const hasVibration = types.includes('vibration');
+  // Route to the channel that has the right sound/vibration combo — Android controls
+  // these at the channel level and ignores per-notification overrides.
+  const channelId = hasSound && hasVibration ? 'dose-alarm'
+    : hasSound ? 'dose-alarm-sound'
+    : 'dose-alarm-vibrate';
   await N.scheduleNotificationAsync({
     identifier: alarmId(med.id, dateStr, time),
     content: {
       title: `Missed dose: ${med.name}`,
       body: `${time} dose has not been logged. Tap to open PillReminder.`,
-      sound: types.includes('sound'),
-      vibrationPattern: types.includes('vibration') ? [0, 500, 200, 500] : [0],
       priority: 'max',
-      channelId: 'dose-alarm',
+      channelId,
       data: { medId: med.id, scheduledAt: `${dateStr}T${time}:00`, type: 'alarm' },
     },
     trigger: {

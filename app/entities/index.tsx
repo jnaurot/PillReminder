@@ -111,8 +111,8 @@ export default function EntitiesScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.push('/settings')} style={styles.settingsBtn}>
-          <Text style={styles.settingsText}>⚙</Text>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+          <Text style={styles.backText}> ‹ Back</Text>
         </TouchableOpacity>
         <Text style={styles.title}>People</Text>
         <TouchableOpacity style={styles.addButton} onPress={() => router.push('/entities/new')}>
@@ -168,8 +168,8 @@ const styles = StyleSheet.create({
   title: { fontSize: 22, fontWeight: '700', color: '#1A2F5A' },
   addButton: { backgroundColor: '#4A90D9', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 },
   addButtonText: { color: '#FFFFFF', fontWeight: '600', fontSize: 14 },
-  settingsBtn: { padding: 4 },
-  settingsText: { fontSize: 22, color: '#4A90D9' },
+  backBtn: { padding: 10 },
+  backText: { fontSize: 16, color: '#4A90D9' },
   list: { padding: 16, gap: 12 },
   card: {
     backgroundColor: '#FFFFFF', borderRadius: 14, padding: 16,

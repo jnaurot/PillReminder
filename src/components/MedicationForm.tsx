@@ -41,6 +41,43 @@ function TimePicker({
 }) {
   const [customTime, setCustomTime] = useState('');
 
+  function handleCustomTimeChange(text: string) {
+    const isDeleting = text.length < customTime.length;
+    const digits = text.replace(/\D/g, '').slice(0, 4);
+    const prevDigits = customTime.replace(/\D/g, '');
+
+    if (isDeleting) {
+      setCustomTime(digits.length <= 2 ? digits : `${digits.slice(0, 2)}:${digits.slice(2)}`);
+      return;
+    }
+
+    if (digits.length === prevDigits.length || digits.length > 4) return;
+
+    const d = parseInt(digits[digits.length - 1]);
+
+    switch (digits.length) {
+      case 1:
+        // First hour digit > 2 can't be valid as-is; auto-prepend 0
+        setCustomTime(d > 2 ? `0${d}:` : `${d}`);
+        break;
+      case 2: {
+        const h1 = parseInt(digits[0]);
+        // Second hour digit: if h1 is 2, only 0–3 are valid (20–23)
+        if (h1 === 2 && d > 3) return;
+        setCustomTime(`${digits}:`);
+        break;
+      }
+      case 3:
+        // First minute digit must be 0–5
+        if (d > 5) return;
+        setCustomTime(`${digits.slice(0, 2)}:${digits[2]}`);
+        break;
+      case 4:
+        setCustomTime(`${digits.slice(0, 2)}:${digits.slice(2)}`);
+        break;
+    }
+  }
+
   function togglePreset(t: string) {
     onChange(
       times.includes(t) ? times.filter((x) => x !== t) : [...times, t].sort()
@@ -49,8 +86,9 @@ function TimePicker({
 
   function addCustom() {
     const t = customTime.trim();
-    if (!/^\d{2}:\d{2}$/.test(t)) {
-      Alert.alert('Invalid time', 'Enter time as HH:MM (e.g. 07:30)');
+    const [h, m] = t.split(':').map(Number);
+    if (!/^\d{2}:\d{2}$/.test(t) || h > 23 || m > 59) {
+      Alert.alert('Invalid time', 'Enter a valid time as HH:MM (e.g. 07:30)');
       return;
     }
     if (!times.includes(t)) onChange([...times, t].sort());
@@ -76,10 +114,10 @@ function TimePicker({
         <TextInput
           style={tp.customInput}
           value={customTime}
-          onChangeText={setCustomTime}
+          onChangeText={handleCustomTimeChange}
           placeholder="HH:MM"
           placeholderTextColor="#94A3B8"
-          keyboardType="numeric"
+          keyboardType="number-pad"
         />
         <TouchableOpacity style={tp.addBtn} onPress={addCustom}>
           <Text style={tp.addBtnText}>Add</Text>
