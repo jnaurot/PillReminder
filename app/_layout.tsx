@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Stack, router } from 'expo-router';
-import { Alert, View, ActivityIndicator } from 'react-native';
+import { Alert, View, ActivityIndicator, Vibration } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as Linking from 'expo-linking';
 import Constants from 'expo-constants';
@@ -27,7 +27,7 @@ async function schedulePathForNotif(data: Record<string, unknown>): Promise<stri
 
 async function initNotifications() {
   if (isExpoGo) return;
-  const { setNotificationHandler } = await import('expo-notifications');
+  const { setNotificationHandler, addNotificationReceivedListener } = await import('expo-notifications');
   const { requestNotificationPermissions } = await import('../src/notifications/permissions');
   const { rescheduleAll } = await import('../src/notifications/scheduler');
 
@@ -38,6 +38,14 @@ async function initNotifications() {
       shouldPlaySound: true,
       shouldSetBadge: false,
     }),
+  });
+
+  // Foreground: vibrate directly when an alarm/test notification arrives.
+  addNotificationReceivedListener((notification) => {
+    const type = (notification.request.content.data as any)?.type;
+    if (type === 'alarm' || type === 'test') {
+      Vibration.vibrate([0, 5000]);
+    }
   });
 
   const granted = await requestNotificationPermissions();
@@ -129,6 +137,8 @@ export default function RootLayout() {
         // Foreground / background: app already running, user taps notification.
         listenerRef.current = N.addNotificationResponseReceivedListener(
           async (response) => {
+            const notifId = response.notification.request.identifier;
+            if (notifId) await N.dismissNotificationAsync(notifId).catch(() => {});
             const path = await schedulePathForNotif(
               response.notification.request.content.data as Record<string, unknown>,
             );

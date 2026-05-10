@@ -6,6 +6,7 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Constants from 'expo-constants';
 import * as DocumentPicker from 'expo-document-picker';
 import { getSettings, setSetting, type AppSettings } from '../src/db/settings';
 import { exportCSV, exportBackup, importBackup } from '../src/db/backup';
@@ -319,6 +320,8 @@ export default function SettingsScreen() {
           </TouchableOpacity>
         </View>
 
+        <Text style={styles.version}>v{Constants.expoConfig?.version ?? '—'}</Text>
+
       </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -381,4 +384,5 @@ const styles = StyleSheet.create({
   dataBtnTitleDanger: { color: '#DC2626' },
   dataBtnDesc: { fontSize: 12, color: '#94A3B8', marginTop: 2 },
   dataBtnArrow: { fontSize: 20, color: '#CBD5E1', marginLeft: 8 },
+  version: { fontSize: 12, color: '#64748B', textAlign: 'center', paddingVertical: 8 },
 });

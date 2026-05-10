@@ -1,13 +1,13 @@
 import { useCallback, useState } from 'react';
 import {
   View, Text, SectionList, TouchableOpacity,
-  StyleSheet, ActivityIndicator, RefreshControl,
+  StyleSheet, ActivityIndicator, RefreshControl, Alert, Vibration,
 } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getAllDosesForDate, todayStr, type ScheduledDose, type EntityDoses } from '../src/db/doseLogs';
 import { DoseCard } from '../src/components/DoseCard';
-import { setBadge } from '../src/notifications/scheduler';
+import { setBadge, scheduleTestAlarm } from '../src/notifications/scheduler';
 import { getActiveShift, type ShiftWithCaregiver } from '../src/db/caregivers';
 
 type Section = EntityDoses & { data: ScheduledDose[] };
@@ -86,6 +86,31 @@ export default function TodayScreen() {
             onPress={() => router.push('/entities')}
           >
             <Text style={styles.peopleBtnText}>People ›</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.testBtn}
+            onPress={() => {
+              Alert.alert(
+                'Test vibration',
+                'Choose a test type.',
+                [
+                  {
+                    text: 'Direct (5 sec)',
+                    onPress: () => Vibration.vibrate([0, 5000]),
+                  },
+                  {
+                    text: 'Notification (5 sec)',
+                    onPress: async () => {
+                      await scheduleTestAlarm();
+                      Alert.alert('Alarm in 5 sec', 'Background the app now.');
+                    },
+                  },
+                  { text: 'Cancel', style: 'cancel' },
+                ],
+              );
+            }}
+          >
+            <Text style={styles.testBtnText}>Test</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={() => router.push('/settings')} style={styles.settingsBtn}>
             <Text style={styles.settingsText}>⚙</Text>
@@ -195,6 +220,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#F1F5F9', borderRadius: 16,
   },
   peopleBtnText: { fontSize: 13, fontWeight: '600', color: '#4A90D9' },
+  testBtn: {
+    paddingHorizontal: 10, paddingVertical: 7,
+    backgroundColor: '#FFF7ED', borderRadius: 16,
+    borderWidth: 1, borderColor: '#FED7AA',
+  },
+  testBtnText: { fontSize: 13, fontWeight: '600', color: '#C2410C' },
   settingsBtn: { padding: 4 },
   settingsText: { fontSize: 22, color: '#4A90D9' },
   summaryBanner: {

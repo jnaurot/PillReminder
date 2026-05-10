@@ -2,12 +2,14 @@
 
 ● Dev build (local, on-device)
 
-  1. Enable USB debugging on your phone (Settings → Developer Options → USB Debugging)
+  1. Enable USB debugging and notifications on your phone (Settings → Developer Options → USB Debugging)
   2. Plug phone in via USB
   3. Accept the "Allow USB debugging?" prompt on the phone
   4. source ~/.bashrc
-  5. cd ~/Projects/PillReminder && ./node_modules/.bin/expo run:android
-  6. Accept any install prompts on the phone
+  4.5. conda deactivate
+  5. cd ~/Projects/PillReminder
+  6. ./node_modules/.bin/expo run:android
+  7. Accept any install prompts on the phone
 
   ---
   Production build (EAS cloud → install on phone)

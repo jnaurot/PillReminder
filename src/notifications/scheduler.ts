@@ -161,15 +161,16 @@ async function scheduleAlarmForDate(
   const hasVibration = types.includes('vibration');
   // Route to the channel that has the right sound/vibration combo — Android controls
   // these at the channel level and ignores per-notification overrides.
-  const channelId = hasSound && hasVibration ? 'dose-alarm'
-    : hasSound ? 'dose-alarm-sound'
-    : 'dose-alarm-vibrate';
+  const channelId = hasSound && hasVibration ? 'dose-alarm-v3'
+    : hasSound ? 'dose-alarm-sound-v3'
+    : 'dose-alarm-vibrate-v3';
   await N.scheduleNotificationAsync({
     identifier: alarmId(med.id, dateStr, time),
     content: {
       title: `Missed dose: ${med.name}`,
       body: `${time} dose has not been logged. Tap to open PillReminder.`,
       priority: 'max',
+      sticky: true,
       channelId,
       data: { medId: med.id, scheduledAt: `${dateStr}T${time}:00`, type: 'alarm' },
     },
@@ -308,6 +309,33 @@ export async function scheduleForMedication(
       case 'monthly':     await scheduleMonthly(N, med, schedule.days, schedule.times, missedWindowMin, alarm); break;
       case 'prn':         break;
     }
+  } catch {}
+}
+
+// ─── Test alarm — fires through dose-alarm-v2 channel in 5 seconds ───────────
+
+export async function scheduleTestAlarm(): Promise<void> {
+  const N = await getN();
+  if (!N) return;
+  try {
+    await N.cancelScheduledNotificationAsync('test-alarm');
+  } catch {}
+  try {
+    await N.scheduleNotificationAsync({
+      identifier: 'test-alarm',
+      content: {
+        title: 'Test alarm',
+        body: 'Alarm channel and vibration are working.',
+        priority: 'max',
+        sticky: false,
+        channelId: 'dose-alarm-v3',
+        data: { type: 'test' },
+      },
+      trigger: {
+        type: N.SchedulableTriggerInputTypes.TIME_INTERVAL,
+        seconds: 5,
+      },
+    });
   } catch {}
 }
 
