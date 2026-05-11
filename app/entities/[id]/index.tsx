@@ -304,7 +304,7 @@ export default function EntityDetailScreen() {
         onPress={() => router.push(`/entities/${id}/schedule`)}
         activeOpacity={0.8}
       >
-        <Text style={styles.scheduleBannerText}>📋  Today's Schedule</Text>
+        <Text style={styles.scheduleBannerText}>📋  Schedule</Text>
         <Text style={styles.scheduleBannerChevron}>›</Text>
       </TouchableOpacity>
       <TouchableOpacity

@@ -1,6 +1,6 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
-  View, Text, FlatList, TouchableOpacity,
+  View, Text, SectionList, TouchableOpacity,
   StyleSheet, ActivityIndicator, RefreshControl,
 } from 'react-native';
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
@@ -8,156 +8,249 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { getDosesForDate, todayStr, type ScheduledDose } from '../../../src/db/doseLogs';
 import { getDb } from '../../../src/db/database';
 import { DoseCard } from '../../../src/components/DoseCard';
+import {
+  addDays,
+  formatHeader,
+  formatSubtitle,
+  buildSection,
+  INITIAL_PAST_DAYS,
+  LOAD_MORE_BATCH,
+  type ScheduleSection,
+  type SectionItem,
+} from '../../../src/utils/scheduleDates';
 
-function dateStr(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
-function addDays(base: string, delta: number): string {
-  const d = new Date(`${base}T00:00:00`);
-  d.setDate(d.getDate() + delta);
-  return dateStr(d);
-}
-
-function formatHeader(date: string, today: string): string {
-  if (date === today) return 'Today';
-  if (date === addDays(today, -1)) return 'Yesterday';
-  const d = new Date(`${date}T00:00:00`);
-  return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
-}
-
-function formatSubtitle(date: string, today: string): string {
-  if (date === today) {
-    return new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
-  }
-  const d = new Date(`${date}T00:00:00`);
-  return d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
-}
+// ─── Component ─────────────────────────────────────────────────────────────
 
 export default function ScheduleScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const today = todayStr();
-  const [date, setDate] = useState(today);
-  const [doses, setDoses] = useState<ScheduledDose[]>([]);
+  const listRef = useRef<SectionList<SectionItem, ScheduleSection>>(null);
+
+  const [sections, setSections] = useState<ScheduleSection[]>([]);
   const [minDate, setMinDate] = useState(today);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  const load = useCallback(async () => {
-    const result = await getDosesForDate(id, date);
-    setDoses(result);
+  // Find earliest dose log date for this entity (earliest dosing information)
+  const findMinDate = useCallback(async () => {
     try {
       const row = await getDb().getFirstAsync<{ earliest: string }>(
-        `SELECT MIN(created_at) as earliest FROM medications WHERE entity_id = ? AND deleted_at IS NULL`,
+        `SELECT MIN(substr(dl.scheduled_at, 1, 10)) as earliest
+         FROM dose_logs dl
+         JOIN medications m ON dl.medication_id = m.id
+         WHERE m.entity_id = ? AND m.deleted_at IS NULL`,
         [id],
       );
-      if (row?.earliest) setMinDate(dateStr(new Date(row.earliest)));
+      if (row?.earliest) {
+        setMinDate(row.earliest);
+        return row.earliest;
+      }
     } catch {}
-    setLoading(false);
-  }, [id, date]);
+    setMinDate(today);
+    return today;
+  }, [id, today]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  // Initial load: today first, then past dates down to minDate
+  const loadInitial = useCallback(async () => {
+    setLoading(true);
+    const minD = await findMinDate();
+
+    const dates: string[] = [];
+    let d = today;
+    let count = 0;
+    while (d >= minD && count <= INITIAL_PAST_DAYS) {
+      dates.push(d);
+      d = addDays(d, -1);
+      count++;
+    }
+
+    const newSections = await Promise.all(
+      dates.map(async (d) => buildSection(d, await getDosesForDate(id, d), today)),
+    );
+    setSections(newSections);
+    setHasMore(minD < addDays(dates[dates.length - 1] ?? today, -1));
+    setLoading(false);
+  }, [findMinDate, id, today]);
+
+  // Load more past dates when user scrolls to the bottom
+  const loadMorePast = useCallback(async () => {
+    if (loadingMore || !hasMore || sections.length === 0) return;
+    setLoadingMore(true);
+
+    const lastDate = sections[sections.length - 1].dateStr;
+    const nextEnd = addDays(lastDate, -LOAD_MORE_BATCH);
+    const actualEnd = nextEnd < minDate ? minDate : nextEnd;
+
+    const dates: string[] = [];
+    for (let d = addDays(lastDate, -1); d >= actualEnd; d = addDays(d, -1)) {
+      dates.push(d);
+    }
+
+    if (dates.length === 0) {
+      setHasMore(false);
+      setLoadingMore(false);
+      return;
+    }
+
+    const newSections = await Promise.all(
+      dates.map(async (d) => buildSection(d, await getDosesForDate(id, d), today)),
+    );
+
+    setSections((prev) => [...prev, ...newSections]);
+    setHasMore(actualEnd > minDate);
+    setLoadingMore(false);
+  }, [loadingMore, hasMore, sections, minDate, id, today]);
+
+  // Reload all currently visible dates after a dose action
+  const handleReload = useCallback(async () => {
+    if (sections.length === 0) return;
+    const currentDates = sections.map((s) => s.dateStr);
+    const newSections = await Promise.all(
+      currentDates.map(async (d) => buildSection(d, await getDosesForDate(id, d), today)),
+    );
+    setSections(newSections);
+  }, [sections, id, today]);
 
   async function handleRefresh() {
     setRefreshing(true);
-    await load();
+    await handleReload();
     setRefreshing(false);
   }
 
-  function goBack()    { setLoading(true); setDate((d) => addDays(d, -1)); }
-  function goForward() { setLoading(true); setDate((d) => addDays(d, +1)); }
+  useFocusEffect(
+    useCallback(() => {
+      if (sections.length === 0) {
+        loadInitial();
+      } else {
+        handleReload();
+      }
+    }, [loadInitial, handleReload, sections.length]),
+  );
 
-  const isPast    = date < today;
-  const isToday   = date === today;
-  const isMinDate = date <= minDate;
-  const actionable = doses.filter((d) => d.status === 'due' || d.status === 'missed');
-  const settled    = doses.filter((d) => d.status === 'taken' || d.status === 'skipped');
+  // ─── Render helpers ─────────────────────────────────────────────────────────
+
+  const renderSectionHeader = useCallback(
+    ({ section }: { section: ScheduleSection }) => (
+      <View
+        style={[
+          styles.sectionHeader,
+          section.isFuture && styles.sectionHeaderFuture,
+          section.isToday && styles.sectionHeaderToday,
+        ]}
+      >
+        <Text
+          style={[
+            styles.sectionHeaderTitle,
+            section.isFuture && styles.sectionHeaderTitleFuture,
+          ]}
+        >
+          {section.header}
+        </Text>
+        <Text style={styles.sectionHeaderSub}>{section.subHeader}</Text>
+      </View>
+    ),
+    [],
+  );
+
+  const renderItem = useCallback(
+    ({ item, section }: { item: SectionItem; section: ScheduleSection }) => {
+      if ('isPlaceholder' in item) {
+        return (
+          <View style={styles.emptyDay}>
+            <Text style={styles.emptyDayText}>No doses scheduled</Text>
+          </View>
+        );
+      }
+      return (
+        <View style={section.isFuture ? styles.itemFuture : undefined}>
+          <DoseCard
+            dose={item}
+            allDoses={section.data.filter((d): d is ScheduledDose => !('isPlaceholder' in d))}
+            onAction={handleReload}
+          />
+        </View>
+      );
+    },
+    [handleReload],
+  );
+
+  const renderSectionFooter = useCallback(
+    ({ section }: { section: ScheduleSection }) => {
+      if (section.isToday) {
+        const realDoses = section.data.filter((d): d is ScheduledDose => !('isPlaceholder' in d));
+        const actionable = realDoses.filter((d) => d.status === 'due' || d.status === 'missed');
+        const settled = realDoses.filter((d) => d.status === 'taken' || d.status === 'skipped');
+        return (
+          <View style={styles.todayFooter}>
+            {actionable.length > 0 ? (
+              <Text style={styles.summaryText}>
+                {actionable.length} action{actionable.length !== 1 ? 's' : ''} needed · {settled.length} done
+              </Text>
+            ) : (
+              <Text style={[styles.summaryText, styles.summaryTextGreen]}>
+                ✓ All doses accounted for
+              </Text>
+            )}
+          </View>
+        );
+      }
+      if (section.isPast) {
+        return (
+          <View style={styles.retroFooter}>
+            <Text style={styles.retroText}>
+              Past date — doses recorded as taken at their scheduled time.
+            </Text>
+          </View>
+        );
+      }
+      return null;
+    },
+    [],
+  );
+
+  // ─── Render ─────────────────────────────────────────────────────────────────
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      {/* Main header */}
+      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Text style={styles.backText}> ‹</Text>
+          <Text style={styles.backText}> ‹ Back</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Schedule</Text>
-        <View style={{ width: 28 }} />
+        <View style={{ width: 60 }} />
       </View>
-
-      {/* Date navigation bar */}
-      <View style={styles.dateBar}>
-        <TouchableOpacity
-          onPress={goBack}
-          style={[styles.dateNavBtn, isMinDate && styles.dateNavBtnDisabled]}
-          disabled={isMinDate}
-        >
-          <Text style={styles.dateNavArrow}>←</Text>
-          <Text style={styles.dateNavLabel}>Prev</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          onPress={() => { setLoading(true); setDate(today); }}
-          disabled={isToday}
-          style={styles.dateCenterBtn}
-        >
-          <Text style={styles.dateCenterTitle}>{formatHeader(date, today)}</Text>
-          <Text style={styles.dateCenterSub}>{formatSubtitle(date, today)}</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          onPress={goForward}
-          style={[styles.dateNavBtn, isToday && styles.dateNavBtnDisabled]}
-          disabled={isToday}
-        >
-          <Text style={styles.dateNavLabel}>Next</Text>
-          <Text style={styles.dateNavArrow}>→</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Retroactive notice */}
-      {isPast && (
-        <View style={styles.retroBanner}>
-          <Text style={styles.retroText}>
-            Past date — doses recorded as taken at their scheduled time.
-          </Text>
-        </View>
-      )}
 
       {loading ? (
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
           <ActivityIndicator color="#4A90D9" />
         </View>
-      ) : doses.length === 0 ? (
-        <View style={styles.empty}>
-          <Text style={styles.emptyIcon}>✅</Text>
-          <Text style={styles.emptyTitle}>No doses scheduled</Text>
-          <Text style={styles.emptySub}>
-            {isToday
-              ? 'Add medications with a schedule to see them here.'
-              : 'No medications were scheduled on this day.'}
-          </Text>
-        </View>
       ) : (
-        <FlatList
-          data={doses}
-          keyExtractor={(d) => d.key}
-          renderItem={({ item }) => (
-            <DoseCard dose={item} allDoses={doses} onAction={load} />
-          )}
-          contentContainerStyle={styles.list}
+        <SectionList
+          ref={listRef}
+          sections={sections}
+          keyExtractor={(item) => ('isPlaceholder' in item ? item.key : item.key)}
+          renderSectionHeader={renderSectionHeader}
+          renderItem={renderItem}
+          renderSectionFooter={renderSectionFooter}
+          stickySectionHeadersEnabled={true}
+          onEndReached={loadMorePast}
+          onEndReachedThreshold={0.5}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
-          ListHeaderComponent={
-            <View style={styles.summary}>
-              {actionable.length > 0 ? (
-                <Text style={styles.summaryText}>
-                  {actionable.length} action{actionable.length !== 1 ? 's' : ''} needed  ·  {settled.length} done
-                </Text>
-              ) : (
-                <Text style={[styles.summaryText, { color: '#16A34A' }]}>
-                  ✓ All doses accounted for
-                </Text>
-              )}
-            </View>
+          contentContainerStyle={styles.list}
+          ListFooterComponent={
+            loadingMore ? (
+              <View style={styles.loadMore}>
+                <ActivityIndicator size="small" color="#4A90D9" />
+                <Text style={styles.loadMoreText}>Loading more dates…</Text>
+              </View>
+            ) : !hasMore && sections.length > 0 ? (
+              <View style={styles.loadMore}>
+                <Text style={styles.loadMoreText}>Reached earliest record</Text>
+              </View>
+            ) : null
           }
         />
       )}
@@ -165,43 +258,75 @@ export default function ScheduleScreen() {
   );
 }
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F0F4FA' },
   header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 12, paddingVertical: 14,
-    backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E2E8F0',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingVertical: 14,
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2E8F0',
   },
   backBtn: { padding: 10 },
-  backText: { fontSize: 24, color: '#4A90D9', lineHeight: 28 },
+  backText: { fontSize: 16, color: '#4A90D9', fontWeight: '600' },
   headerTitle: { fontSize: 17, fontWeight: '700', color: '#1A2F5A' },
-  dateBar: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E2E8F0',
-    paddingVertical: 10, paddingHorizontal: 8,
+
+  list: { paddingHorizontal: 16, paddingTop: 8, gap: 8, paddingBottom: 24 },
+
+  sectionHeader: {
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2E8F0',
+    marginHorizontal: -16,
   },
-  dateNavBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    paddingHorizontal: 12, paddingVertical: 6,
-    backgroundColor: '#F1F5F9', borderRadius: 10,
+  sectionHeaderFuture: { backgroundColor: '#F8FAFC' },
+  sectionHeaderToday: { backgroundColor: '#FFF7ED' },
+  sectionHeaderTitle: { fontSize: 15, fontWeight: '700', color: '#1A2F5A' },
+  sectionHeaderTitleFuture: { color: '#94A3B8' },
+  sectionHeaderSub: { fontSize: 11, color: '#94A3B8', marginTop: 1 },
+
+  itemFuture: { opacity: 0.85 },
+
+  emptyDay: {
+    paddingVertical: 24,
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    marginVertical: 4,
   },
-  dateNavBtnDisabled: { opacity: 0.3 },
-  dateNavArrow: { fontSize: 16, color: '#4A90D9', fontWeight: '700' },
-  dateNavLabel: { fontSize: 12, color: '#4A90D9', fontWeight: '600' },
-  dateCenterBtn: { flex: 1, alignItems: 'center' },
-  dateCenterTitle: { fontSize: 15, fontWeight: '700', color: '#1A2F5A' },
-  dateCenterSub: { fontSize: 11, color: '#94A3B8', marginTop: 1 },
-  retroBanner: {
+  emptyDayText: { fontSize: 13, color: '#CBD5E1', fontWeight: '500' },
+
+  todayFooter: {
+    paddingHorizontal: 4,
+    paddingTop: 8,
+    paddingBottom: 12,
+  },
+  summaryText: { fontSize: 13, color: '#64748B', fontWeight: '500' },
+  summaryTextGreen: { color: '#16A34A' },
+
+  retroFooter: {
     backgroundColor: '#FFFBEB',
-    paddingHorizontal: 16, paddingVertical: 8,
-    borderBottomWidth: 1, borderBottomColor: '#FDE68A',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#FDE68A',
+    marginHorizontal: -16,
   },
   retroText: { fontSize: 12, color: '#92400E', textAlign: 'center' },
-  summary: { paddingHorizontal: 4, paddingBottom: 8 },
-  summaryText: { fontSize: 13, color: '#64748B', fontWeight: '500' },
-  list: { padding: 16, gap: 12 },
-  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10 },
-  emptyIcon:  { fontSize: 48 },
-  emptyTitle: { fontSize: 18, fontWeight: '600', color: '#1A2F5A' },
-  emptySub:   { fontSize: 14, color: '#64748B', textAlign: 'center', paddingHorizontal: 40 },
+
+  loadMore: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 16,
+  },
+  loadMoreText: { fontSize: 12, color: '#94A3B8' },
 });
