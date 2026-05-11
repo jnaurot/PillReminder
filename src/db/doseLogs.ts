@@ -103,6 +103,11 @@ export async function getDosesForDate(
   const doses: ScheduledDose[] = [];
 
   for (const med of medications) {
+    // Don't show a medication on dates before it was entered.
+    const ca = new Date(med.created_at);
+    const createdDateStr = `${ca.getFullYear()}-${String(ca.getMonth() + 1).padStart(2, '0')}-${String(ca.getDate()).padStart(2, '0')}`;
+    if (createdDateStr > dateStr) continue;
+
     const schedule: MedicationSchedule = parseSchedule(med.schedule);
     const earlyWindow = med.early_window_minutes ?? settings.early_window_minutes;
     const missedWindow = settings.missed_window_minutes;
