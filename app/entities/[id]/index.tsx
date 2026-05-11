@@ -291,9 +291,8 @@ export default function EntityDetailScreen() {
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Text style={styles.backText}> ‹</Text>
+          <Text style={styles.backText}> ‹ Back</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle} numberOfLines={1}>{entity.name}</Text>
         <TouchableOpacity onPress={() => router.push(`/entities/${id}/edit`)}>
           <Text style={styles.editText}>Edit</Text>
         </TouchableOpacity>
@@ -433,6 +432,7 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 12,
     paddingVertical: 14,
     backgroundColor: '#FFFFFF',
@@ -440,7 +440,7 @@ const styles = StyleSheet.create({
     borderBottomColor: '#E2E8F0',
   },
   backBtn: { padding: 10, marginRight: 4 },
-  backText: { fontSize: 24, color: '#4A90D9', lineHeight: 28 },
+  backText: { fontSize: 16, color: '#4A90D9' },
   headerTitle: { flex: 1, fontSize: 17, fontWeight: '600', color: '#1A2F5A' },
   editText: { fontSize: 16, color: '#4A90D9', fontWeight: '600' },
   infoCard: {

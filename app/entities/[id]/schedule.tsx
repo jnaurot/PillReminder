@@ -6,6 +6,7 @@ import {
 import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getDosesForDate, todayStr, type ScheduledDose } from '../../../src/db/doseLogs';
+import { getDb } from '../../../src/db/database';
 import { DoseCard } from '../../../src/components/DoseCard';
 
 function dateStr(d: Date): string {
@@ -38,12 +39,20 @@ export default function ScheduleScreen() {
   const today = todayStr();
   const [date, setDate] = useState(today);
   const [doses, setDoses] = useState<ScheduledDose[]>([]);
+  const [minDate, setMinDate] = useState(today);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
     const result = await getDosesForDate(id, date);
     setDoses(result);
+    try {
+      const row = await getDb().getFirstAsync<{ earliest: string }>(
+        `SELECT MIN(created_at) as earliest FROM medications WHERE entity_id = ? AND deleted_at IS NULL`,
+        [id],
+      );
+      if (row?.earliest) setMinDate(dateStr(new Date(row.earliest)));
+    } catch {}
     setLoading(false);
   }, [id, date]);
 
@@ -60,6 +69,7 @@ export default function ScheduleScreen() {
 
   const isPast    = date < today;
   const isToday   = date === today;
+  const isMinDate = date <= minDate;
   const actionable = doses.filter((d) => d.status === 'due' || d.status === 'missed');
   const settled    = doses.filter((d) => d.status === 'taken' || d.status === 'skipped');
 
@@ -76,7 +86,11 @@ export default function ScheduleScreen() {
 
       {/* Date navigation bar */}
       <View style={styles.dateBar}>
-        <TouchableOpacity onPress={goBack} style={styles.dateNavBtn}>
+        <TouchableOpacity
+          onPress={goBack}
+          style={[styles.dateNavBtn, isMinDate && styles.dateNavBtnDisabled]}
+          disabled={isMinDate}
+        >
           <Text style={styles.dateNavArrow}>←</Text>
           <Text style={styles.dateNavLabel}>Prev</Text>
         </TouchableOpacity>

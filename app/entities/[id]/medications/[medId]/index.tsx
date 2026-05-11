@@ -235,23 +235,21 @@ export default function MedicationDetailScreen() {
       {/* Header */}
       <View style={s.header}>
         <TouchableOpacity onPress={() => router.back()} style={s.backBtn}>
-          <Text style={s.backText}> ‹</Text>
+          <Text style={s.backText}> ‹ Back</Text>
         </TouchableOpacity>
-        <View style={{ flex: 1 }}>
-          <Text style={s.headerTitle} numberOfLines={1}>{med.name}</Text>
-          <Text style={s.headerSub}>{med.dosage}</Text>
-        </View>
-        {!med.deleted_at && (
-          <TouchableOpacity onPress={handleDelete} style={s.deleteBtn}>
-            <Text style={s.deleteIcon}>🗑</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          {!med.deleted_at && (
+            <TouchableOpacity onPress={handleDelete} style={s.deleteBtn}>
+              <Text style={s.deleteIcon}>🗑</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity
+            onPress={!med.deleted_at ? () => router.push(`/entities/${id}/medications/${medId}/edit`) : undefined}
+            disabled={!!med.deleted_at}
+          >
+            <Text style={[s.editBtn, med.deleted_at ? s.editBtnDisabled : null]}>Edit</Text>
           </TouchableOpacity>
-        )}
-        <TouchableOpacity
-          onPress={!med.deleted_at ? () => router.push(`/entities/${id}/medications/${medId}/edit`) : undefined}
-          disabled={!!med.deleted_at}
-        >
-          <Text style={[s.editBtn, med.deleted_at ? s.editBtnDisabled : null]}>Edit</Text>
-        </TouchableOpacity>
+        </View>
       </View>
 
       {/* Removed banner */}
@@ -388,12 +386,12 @@ export default function MedicationDetailScreen() {
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F0F4FA' },
   header: {
-    flexDirection: 'row', alignItems: 'center',
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 16, paddingVertical: 14,
     backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#E2E8F0',
   },
   backBtn: { padding: 10, marginRight: 4 },
-  backText: { fontSize: 24, color: '#4A90D9', lineHeight: 28 },
+  backText: { fontSize: 16, color: '#4A90D9' },
   headerTitle: { fontSize: 17, fontWeight: '700', color: '#1A2F5A' },
   headerSub: { fontSize: 12, color: '#64748B' },
   editBtn: { fontSize: 15, color: '#4A90D9', fontWeight: '600' },
