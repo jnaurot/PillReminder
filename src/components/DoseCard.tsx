@@ -11,7 +11,7 @@ import {
 import type { DoseLog } from '../types/index';
 import { parseSchedule, parseInteractions } from '../types/index';
 import type { MedicationInteraction } from '../types/index';
-import { cancelMissedAlert } from '../notifications/scheduler';
+import { cancelMissedAlert, cancelAlarmAlert } from '../notifications/scheduler';
 import { defaultTransport } from '../messaging/transport';
 import { MSG_VERSION } from '../messaging/types';
 
@@ -335,7 +335,10 @@ export function DoseCard({
 
     if (missed.length === 0 || policy === 'none') {
       await logDoseTaken(dose.medication.id, dose.scheduledAt);
-      if (dose.scheduledAt) await cancelMissedAlert(dose.medication.id, dose.scheduledAt);
+      if (dose.scheduledAt) {
+        await cancelMissedAlert(dose.medication.id, dose.scheduledAt);
+        await cancelAlarmAlert(dose.medication.id, dose.scheduledAt);
+      }
       await maybeSendDoseUpdate(dose.scheduledAt ?? new Date().toISOString(), false, null);
       return;
     }
@@ -355,8 +358,14 @@ export function DoseCard({
                 dose.medication.id, dose.scheduledAt,
                 missedDose.scheduledAt ?? undefined,
               );
-              if (dose.scheduledAt) await cancelMissedAlert(dose.medication.id, dose.scheduledAt);
-              if (missedDose.scheduledAt) await cancelMissedAlert(dose.medication.id, missedDose.scheduledAt);
+              if (dose.scheduledAt) {
+                await cancelMissedAlert(dose.medication.id, dose.scheduledAt);
+                await cancelAlarmAlert(dose.medication.id, dose.scheduledAt);
+              }
+              if (missedDose.scheduledAt) {
+                await cancelMissedAlert(dose.medication.id, missedDose.scheduledAt);
+                await cancelAlarmAlert(dose.medication.id, missedDose.scheduledAt);
+              }
               await maybeSendDoseUpdate(dose.scheduledAt ?? new Date().toISOString(), false, null);
             },
           },
@@ -377,8 +386,14 @@ export function DoseCard({
             onPress: async () => {
               await logDoseSkipped(dose.medication.id, missedDose.scheduledAt!);
               await logDoseTaken(dose.medication.id, dose.scheduledAt);
-              if (dose.scheduledAt) await cancelMissedAlert(dose.medication.id, dose.scheduledAt);
-              if (missedDose.scheduledAt) await cancelMissedAlert(dose.medication.id, missedDose.scheduledAt);
+              if (dose.scheduledAt) {
+                await cancelMissedAlert(dose.medication.id, dose.scheduledAt);
+                await cancelAlarmAlert(dose.medication.id, dose.scheduledAt);
+              }
+              if (missedDose.scheduledAt) {
+                await cancelMissedAlert(dose.medication.id, missedDose.scheduledAt);
+                await cancelAlarmAlert(dose.medication.id, missedDose.scheduledAt);
+              }
               await maybeSendDoseUpdate(dose.scheduledAt ?? new Date().toISOString(), false, null);
             },
           },
@@ -400,6 +415,7 @@ export function DoseCard({
           onPress: async () => {
             await logDoseSkipped(dose.medication.id, dose.scheduledAt!);
             await cancelMissedAlert(dose.medication.id, dose.scheduledAt!);
+            await cancelAlarmAlert(dose.medication.id, dose.scheduledAt!);
             await maybeSendDoseUpdate(dose.scheduledAt!, true, null);
           },
         },

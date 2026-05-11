@@ -1,6 +1,6 @@
 import * as SQLite from 'expo-sqlite';
 
-const SCHEMA_VERSION = 9;
+const SCHEMA_VERSION = 10;
 
 let _db: SQLite.SQLiteDatabase | null = null;
 
@@ -110,6 +110,11 @@ export async function initDb(): Promise<void> {
       primary_phone     TEXT NOT NULL DEFAULT '',
       created_at        TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS native_alarms (
+      alarm_id TEXT PRIMARY KEY,
+      med_id   TEXT NOT NULL
+    );
   `);
 
   if (currentVersion < 6) {
@@ -133,6 +138,8 @@ export async function initDb(): Promise<void> {
         ('alarm_type', 'sound,vibration');
     `);
   }
+
+  // v10: native_alarms table created via CREATE TABLE IF NOT EXISTS above
 
   const addCol = async (table: string, col: string, def: string) => {
     try {

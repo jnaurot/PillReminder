@@ -1,9 +1,11 @@
 import Constants from 'expo-constants';
+import { Platform } from 'react-native';
 import { getDb } from '../db/database';
 import { getSettings } from '../db/settings';
 import { parseSchedule } from '../types';
 import type { Medication } from '../types';
 import { dateToStr } from '../utils/dateTime';
+import { scheduleAlarmNative, cancelAlarmNative } from '../native/alarmScheduler';
 
 const isExpoGo = Constants.executionEnvironment === 'storeClient';
 
@@ -49,6 +51,16 @@ export async function cancelForMedication(medId: string): Promise<void> {
         .map((n) => N.cancelScheduledNotificationAsync(n.identifier))
     );
   } catch {}
+  if (Platform.OS === 'android') {
+    try {
+      const db = getDb();
+      const rows = await db.getAllAsync<{ alarm_id: string }>(
+        'SELECT alarm_id FROM native_alarms WHERE med_id = ?', [medId]
+      );
+      for (const row of rows) cancelAlarmNative(row.alarm_id);
+      await db.runAsync('DELETE FROM native_alarms WHERE med_id = ?', [medId]);
+    } catch {}
+  }
 }
 
 // ─── Cancel the missed alert for a specific scheduled dose ────────────────────
@@ -60,6 +72,23 @@ export async function cancelMissedAlert(medId: string, scheduledAtStr: string): 
     const [dateStr, timePart] = scheduledAtStr.split('T');
     const timeHHmm = timePart?.slice(0, 5) ?? '';
     await N.cancelScheduledNotificationAsync(missId(medId, dateStr, timeHHmm));
+  } catch {}
+}
+
+// ─── Cancel the native alarm for a specific scheduled dose ────────────────────
+
+export async function cancelAlarmAlert(medId: string, scheduledAtStr: string): Promise<void> {
+  try {
+    const [dateStr, timePart] = scheduledAtStr.split('T');
+    const timeHHmm = timePart?.slice(0, 5) ?? '';
+    const id = alarmId(medId, dateStr, timeHHmm);
+    cancelAlarmNative(id);
+    if (Platform.OS === 'android') {
+      try {
+        const db = getDb();
+        await db.runAsync('DELETE FROM native_alarms WHERE alarm_id = ?', [id]);
+      } catch {}
+    }
   } catch {}
 }
 
@@ -156,29 +185,41 @@ async function scheduleAlarmForDate(
   if (alarmTime <= new Date()) return;
 
   const dateStr = dateToStr(date);
+  const id = alarmId(med.id, dateStr, time);
+  const title = `Missed dose: ${med.name}`;
+  const body = `${time} dose has not been logged. Tap to open PillReminder.`;
   const types = alarmType.split(',').map((s) => s.trim());
   const hasSound = types.includes('sound');
   const hasVibration = types.includes('vibration');
-  // Route to the channel that has the right sound/vibration combo — Android controls
-  // these at the channel level and ignores per-notification overrides.
   const channelId = hasSound && hasVibration ? 'dose-alarm-v3'
     : hasSound ? 'dose-alarm-sound-v3'
     : 'dose-alarm-vibrate-v3';
-  await N.scheduleNotificationAsync({
-    identifier: alarmId(med.id, dateStr, time),
-    content: {
-      title: `Missed dose: ${med.name}`,
-      body: `${time} dose has not been logged. Tap to open PillReminder.`,
-      priority: 'max',
-      sticky: true,
-      channelId,
-      data: { medId: med.id, scheduledAt: `${dateStr}T${time}:00`, type: 'alarm' },
-    },
-    trigger: {
-      type: N.SchedulableTriggerInputTypes.DATE,
-      date: alarmTime,
-    },
-  });
+
+  if (Platform.OS === 'android') {
+    scheduleAlarmNative(id, title, body, alarmTime.getTime(), channelId);
+    try {
+      await getDb().runAsync(
+        'INSERT OR REPLACE INTO native_alarms (alarm_id, med_id) VALUES (?, ?)',
+        [id, med.id],
+      );
+    } catch {}
+  } else {
+    await N.scheduleNotificationAsync({
+      identifier: id,
+      content: {
+        title,
+        body,
+        priority: 'max',
+        sticky: true,
+        channelId,
+        data: { medId: med.id, scheduledAt: `${dateStr}T${time}:00`, type: 'alarm' },
+      },
+      trigger: {
+        type: N.SchedulableTriggerInputTypes.DATE,
+        date: alarmTime,
+      },
+    });
+  }
 }
 
 // ─── Schedule fixed-times (daily repeating) ───────────────────────────────────
@@ -312,9 +353,24 @@ export async function scheduleForMedication(
   } catch {}
 }
 
-// ─── Test alarm — fires through dose-alarm-v2 channel in 5 seconds ───────────
+// ─── Test alarm — fires in 5 seconds ─────────────────────────────────────────
 
 export async function scheduleTestAlarm(): Promise<void> {
+  if (Platform.OS === 'android') {
+    const fireMs = Date.now() + 5000;
+    console.log('[PillReminder] scheduleTestAlarm: cancelAlarmNative');
+    cancelAlarmNative('test-alarm');
+    console.log(`[PillReminder] scheduleTestAlarm: scheduleAlarmNative fireMs=${fireMs}`);
+    scheduleAlarmNative(
+      'test-alarm',
+      'Test alarm',
+      'Full-screen intent and vibration are working.',
+      fireMs,
+      'dose-alarm-v3',
+    );
+    console.log('[PillReminder] scheduleTestAlarm: done');
+    return;
+  }
   const N = await getN();
   if (!N) return;
   try {
@@ -356,6 +412,14 @@ export async function rescheduleAll(): Promise<void> {
   if (!N) return;
   try {
     await N.cancelAllScheduledNotificationsAsync();
+    if (Platform.OS === 'android') {
+      try {
+        const db = getDb();
+        const rows = await db.getAllAsync<{ alarm_id: string }>('SELECT alarm_id FROM native_alarms');
+        for (const row of rows) cancelAlarmNative(row.alarm_id);
+        await db.runAsync('DELETE FROM native_alarms');
+      } catch {}
+    }
     const db = getDb();
     const meds = await db.getAllAsync<Medication>(`SELECT * FROM medications WHERE deleted_at IS NULL`);
     const settings = await getSettings();
