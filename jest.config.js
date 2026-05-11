@@ -20,6 +20,7 @@ module.exports = {
   moduleNameMapper: {
     '^expo-router$': '<rootDir>/__mocks__/expo-router.ts',
     '^expo-sqlite$': '<rootDir>/__mocks__/expo-sqlite.ts',
+    '^expo-crypto$': '<rootDir>/__mocks__/expo-crypto.ts',
     '^react-native$': '<rootDir>/__mocks__/react-native.ts',
   },
   setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],

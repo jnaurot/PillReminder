@@ -135,7 +135,11 @@ export interface DoseLog {
 
 export function parseSchedule(json: string): MedicationSchedule {
   try {
-    return JSON.parse(json) as MedicationSchedule;
+    const parsed = JSON.parse(json) as unknown;
+    if (!parsed || typeof parsed !== 'object' || !('type' in parsed)) {
+      return { type: 'fixed_times', times: [] };
+    }
+    return parsed as MedicationSchedule;
   } catch {
     return { type: 'fixed_times', times: [] };
   }
@@ -143,7 +147,9 @@ export function parseSchedule(json: string): MedicationSchedule {
 
 export function parseInteractions(json: string): MedicationInteraction[] {
   try {
-    return JSON.parse(json) as MedicationInteraction[];
+    const parsed = JSON.parse(json) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed as MedicationInteraction[];
   } catch {
     return [];
   }
