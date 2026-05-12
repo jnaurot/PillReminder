@@ -390,7 +390,7 @@ const s = StyleSheet.create({
     paddingHorizontal: 16, paddingVertical: 14,
     backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#E2E8F0',
   },
-  backBtn: { padding: 10, marginRight: 4 },
+  backBtn: { padding: 10 },
   backText: { fontSize: 16, color: '#4A90D9' },
   headerTitle: { fontSize: 17, fontWeight: '700', color: '#1A2F5A' },
   headerSub: { fontSize: 12, color: '#64748B' },

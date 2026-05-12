@@ -169,7 +169,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16, paddingVertical: 14,
     backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E2E8F0',
   },
-  backBtn: { width: 60, padding: 10 },
+  backBtn: { padding: 10 },
   backText: { fontSize: 16, color: '#4A90D9' },
   title: { flex: 1, fontSize: 15, fontWeight: '600', color: '#1A2F5A', textAlign: 'center' },
   list: { paddingBottom: 32 },

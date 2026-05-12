@@ -297,7 +297,7 @@ export default function CaregiversScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Text style={styles.backText}> ‹</Text>
+          <Text style={styles.backText}> ‹ Back</Text>
         </TouchableOpacity>
         <Text style={styles.title}>Caregiver Shifts</Text>
         <TouchableOpacity onPress={() => router.push('/caregivers/shift/new')}>
@@ -355,7 +355,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E2E8F0',
   },
   backBtn: { padding: 10 },
-  backText: { fontSize: 24, color: '#4A90D9', lineHeight: 28 },
+  backText: { fontSize: 16, color: '#4A90D9' },
   title: { fontSize: 17, fontWeight: '600', color: '#1A2F5A' },
   newText: { fontSize: 16, color: '#4A90D9', fontWeight: '600' },
   activeBanner: {

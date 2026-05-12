@@ -16,14 +16,17 @@ function scheduledSlotsInPeriod(med: Medication, from: Date, to: Date, cutoff: D
   const schedule = parseSchedule(med.schedule);
   if (schedule.type === 'prn') return 0;
 
+  const todayMidnight = new Date(cutoff.getFullYear(), cutoff.getMonth(), cutoff.getDate(), 0, 0, 0, 0);
+
   let count = 0;
-  const cur = new Date(from);
+  const cur = new Date(from.getFullYear(), from.getMonth(), from.getDate(), 0, 0, 0, 0);
+
   while (cur <= to) {
+    if (cur > todayMidnight) break;
+
     const dow = cur.getDay();
     const dom = cur.getDate();
-    const isToday = cur.getFullYear() === cutoff.getFullYear() &&
-                    cur.getMonth()    === cutoff.getMonth() &&
-                    cur.getDate()     === cutoff.getDate();
+    const isToday = cur.getTime() === todayMidnight.getTime();
 
     let times: string[] = [];
     switch (schedule.type) {
@@ -132,7 +135,7 @@ export default function ComplianceScreen() {
         <Text style={styles.title} numberOfLines={1}>
           {entity?.name ?? ''} — Compliance
         </Text>
-        <View style={{ width: 60 }} />
+        <View style={{ width: 80 }} />
       </View>
 
       {/* Window selector */}
@@ -261,7 +264,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16, paddingVertical: 14,
     backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E2E8F0',
   },
-  backBtn: { width: 60, padding: 10 },
+  backBtn: { padding: 10 },
   backText: { fontSize: 16, color: '#4A90D9' },
   title: { flex: 1, fontSize: 15, fontWeight: '600', color: '#1A2F5A', textAlign: 'center' },
   windowRow: {

@@ -439,7 +439,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#E2E8F0',
   },
-  backBtn: { padding: 10, marginRight: 4 },
+  backBtn: { padding: 10 },
   backText: { fontSize: 16, color: '#4A90D9' },
   headerTitle: { flex: 1, fontSize: 17, fontWeight: '600', color: '#1A2F5A' },
   editText: { fontSize: 16, color: '#4A90D9', fontWeight: '600' },

@@ -273,7 +273,7 @@ const styles = StyleSheet.create({
     borderBottomColor: '#E2E8F0',
   },
   backBtn: { padding: 10 },
-  backText: { fontSize: 16, color: '#4A90D9', fontWeight: '600' },
+  backText: { fontSize: 16, color: '#4A90D9' },
   headerTitle: { fontSize: 17, fontWeight: '700', color: '#1A2F5A' },
 
   list: { paddingHorizontal: 16, paddingTop: 8, gap: 8, paddingBottom: 24 },
