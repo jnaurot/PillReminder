@@ -11,6 +11,11 @@ function hashId(s: string): number {
   return (h % 2147483647) + 1;
 }
 
+function ensureModule(): void {
+  if (Platform.OS !== 'android') throw new Error('AlarmScheduler is Android-only');
+  if (!AlarmScheduler) throw new Error('AlarmScheduler native module is not linked. Was the Android build refreshed after adding the native module?');
+}
+
 export function scheduleAlarmNative(
   id: string,
   title: string,
@@ -18,11 +23,11 @@ export function scheduleAlarmNative(
   fireTimeMs: number,
   channelId: string,
 ): void {
-  if (Platform.OS !== 'android' || !AlarmScheduler) return;
+  ensureModule();
   AlarmScheduler.scheduleAlarm(hashId(id), title, body, fireTimeMs, channelId);
 }
 
 export function cancelAlarmNative(id: string): void {
-  if (Platform.OS !== 'android' || !AlarmScheduler) return;
+  ensureModule();
   AlarmScheduler.cancelAlarm(hashId(id));
 }
