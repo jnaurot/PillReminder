@@ -102,6 +102,7 @@ export interface Medication {
   interactions: string;            // JSON → MedicationInteraction[]
   missed_policy: string | null;    // 'none' | 'catch_up' | 'must_skip' | null
   early_window_minutes: number | null;
+  missed_window_minutes: number | null;
   color: string;
   notes: string | null;
   rxcui: string | null;

@@ -28,7 +28,7 @@ export default function EditMedicationScreen() {
         const alarm = settings.alarm_enabled
           ? { delayMin: settings.alarm_delay_minutes, type: settings.alarm_type }
           : undefined;
-        await scheduleForMedication(updated, settings.missed_window_minutes, alarm);
+        await scheduleForMedication(updated, updated.missed_window_minutes ?? settings.missed_window_minutes, alarm);
       }
       router.back();
       enrichMedication(medId, data.name, id).catch(() => {});
@@ -58,6 +58,7 @@ export default function EditMedicationScreen() {
       initialInteractions={parseInteractions(medication.interactions)}
       initialMissedPolicy={medication.missed_policy as any}
       initialEarlyWindowMinutes={medication.early_window_minutes}
+      initialMissedWindowMinutes={medication.missed_window_minutes}
       initialColor={medication.color}
       initialNotes={medication.notes ?? ''}
       saving={saving}

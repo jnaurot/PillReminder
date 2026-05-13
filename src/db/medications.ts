@@ -36,7 +36,7 @@ type CreateInput = Pick<
   Medication,
   'entity_id' | 'name' | 'dosage' | 'pills_per_dose' |
   'schedule' | 'food_requirement' | 'interactions' |
-  'missed_policy' | 'early_window_minutes' | 'color' | 'notes'
+  'missed_policy' | 'early_window_minutes' | 'missed_window_minutes' | 'color' | 'notes'
 >;
 
 export async function createMedication(data: CreateInput): Promise<Medication> {
@@ -52,6 +52,7 @@ export async function createMedication(data: CreateInput): Promise<Medication> {
     interactions: data.interactions,
     missed_policy: data.missed_policy ?? null,
     early_window_minutes: data.early_window_minutes ?? null,
+    missed_window_minutes: data.missed_window_minutes ?? null,
     color: data.color,
     notes: data.notes ?? null,
     rxcui: null,
@@ -65,13 +66,13 @@ export async function createMedication(data: CreateInput): Promise<Medication> {
   await db.runAsync(
     `INSERT INTO medications
        (id, entity_id, name, dosage, pills_per_dose, schedule, food_requirement,
-        interactions, missed_policy, early_window_minutes, color, notes,
-        rxcui, drug_info, pill_appearance, created_at, updated_at, deleted_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        interactions, missed_policy, early_window_minutes, missed_window_minutes,
+        color, notes, rxcui, drug_info, pill_appearance, created_at, updated_at, deleted_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       med.id, med.entity_id, med.name, med.dosage, med.pills_per_dose,
       med.schedule, med.food_requirement, med.interactions,
-      med.missed_policy, med.early_window_minutes,
+      med.missed_policy, med.early_window_minutes, med.missed_window_minutes,
       med.color, med.notes, null, null, null,
       med.created_at, med.updated_at, null,
     ]
@@ -84,24 +85,25 @@ type UpdateInput = Partial<Pick<
   Medication,
   'name' | 'dosage' | 'pills_per_dose' | 'schedule' |
   'food_requirement' | 'interactions' | 'missed_policy' |
-  'early_window_minutes' | 'color' | 'notes'
+  'early_window_minutes' | 'missed_window_minutes' | 'color' | 'notes'
 >>;
 
 export async function updateMedication(id: string, data: UpdateInput): Promise<void> {
   const db = getDb();
   await db.runAsync(
     `UPDATE medications
-     SET name                 = COALESCE(?, name),
-         dosage               = COALESCE(?, dosage),
-         pills_per_dose       = COALESCE(?, pills_per_dose),
-         schedule             = COALESCE(?, schedule),
-         food_requirement     = ?,
-         interactions         = COALESCE(?, interactions),
-         missed_policy        = ?,
-         early_window_minutes = ?,
-         color                = COALESCE(?, color),
-         notes                = COALESCE(?, notes),
-         updated_at           = ?
+     SET name                  = COALESCE(?, name),
+         dosage                = COALESCE(?, dosage),
+         pills_per_dose        = COALESCE(?, pills_per_dose),
+         schedule              = COALESCE(?, schedule),
+         food_requirement      = ?,
+         interactions          = COALESCE(?, interactions),
+         missed_policy         = ?,
+         early_window_minutes  = ?,
+         missed_window_minutes = ?,
+         color                 = COALESCE(?, color),
+         notes                 = COALESCE(?, notes),
+         updated_at            = ?
      WHERE id = ?`,
     [
       data.name ?? null,
@@ -112,6 +114,7 @@ export async function updateMedication(id: string, data: UpdateInput): Promise<v
       data.interactions ?? null,
       data.missed_policy ?? null,
       data.early_window_minutes ?? null,
+      data.missed_window_minutes ?? null,
       data.color ?? null,
       data.notes ?? null,
       now(),

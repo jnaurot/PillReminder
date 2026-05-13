@@ -256,9 +256,10 @@ export async function initDb(): Promise<void> {
   const addCol = (table: string, col: string, def: string) => {
     try { inner.executeSync(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`); } catch { /* already exists */ }
   };
-  addCol('medications', 'rxcui',           'TEXT');
-  addCol('medications', 'drug_info',       'TEXT');
-  addCol('medications', 'pill_appearance', 'TEXT');
+  addCol('medications', 'rxcui',                'TEXT');
+  addCol('medications', 'drug_info',            'TEXT');
+  addCol('medications', 'pill_appearance',      'TEXT');
+  addCol('medications', 'missed_window_minutes', 'INTEGER');
 
   // Incremental migrations on existing encrypted DB.
   if (currentVersion > 0) {

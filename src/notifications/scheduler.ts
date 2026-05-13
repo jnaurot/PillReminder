@@ -427,7 +427,7 @@ export async function rescheduleAll(): Promise<void> {
       ? { delayMin: settings.alarm_delay_minutes, type: settings.alarm_type }
       : undefined;
     for (const med of meds) {
-      await scheduleForMedication(med, settings.missed_window_minutes, alarm);
+      await scheduleForMedication(med, med.missed_window_minutes ?? settings.missed_window_minutes, alarm);
       // Restore refill alert if this medication has a recent prescription with days_supply
       const rx = await db.getFirstAsync<{ refill_date: string; days_supply: number | null }>(
         `SELECT refill_date, days_supply FROM prescriptions

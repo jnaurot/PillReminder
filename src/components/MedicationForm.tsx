@@ -462,6 +462,7 @@ export interface MedicationFormData {
   interactions: string;         // JSON
   missed_policy: string | null; // 'none' | 'catch_up' | 'must_skip' | null
   early_window_minutes: number | null;
+  missed_window_minutes: number | null;
   color: string;
   notes: string | null;
 }
@@ -477,6 +478,7 @@ interface Props {
   initialInteractions?: MedicationInteraction[];
   initialMissedPolicy?: MissedPolicy;
   initialEarlyWindowMinutes?: number | null;
+  initialMissedWindowMinutes?: number | null;
   initialColor?: string;
   initialNotes?: string;
   currentMedicationId?: string;
@@ -495,6 +497,7 @@ export default function MedicationForm({
   initialInteractions = [],
   initialMissedPolicy = null,
   initialEarlyWindowMinutes = null,
+  initialMissedWindowMinutes = null,
   initialColor = '#4A90D9',
   initialNotes = '',
   currentMedicationId,
@@ -525,6 +528,9 @@ export default function MedicationForm({
   const [missedPolicy, setMissedPolicy] = useState<MissedPolicy>(initialMissedPolicy);
   const [earlyWindowOverride, setEarlyWindowOverride] = useState<string>(
     initialEarlyWindowMinutes !== null ? String(initialEarlyWindowMinutes) : ''
+  );
+  const [missedWindowOverride, setMissedWindowOverride] = useState<string>(
+    initialMissedWindowMinutes !== null ? String(initialMissedWindowMinutes) : ''
   );
   const [color, setColor] = useState(initialColor);
   const [notes, setNotes] = useState(initialNotes);
@@ -574,6 +580,9 @@ export default function MedicationForm({
     const earlyWindow = earlyWindowOverride.trim()
       ? parseInt(earlyWindowOverride, 10)
       : null;
+    const missedWindow = missedWindowOverride.trim()
+      ? parseInt(missedWindowOverride, 10)
+      : null;
 
     onSave({
       name: name.trim(),
@@ -584,6 +593,7 @@ export default function MedicationForm({
       interactions: JSON.stringify(interactions),
       missed_policy: missedPolicy,
       early_window_minutes: isNaN(earlyWindow!) ? null : earlyWindow,
+      missed_window_minutes: isNaN(missedWindow!) ? null : missedWindow,
       color,
       notes: notes.trim() || null,
     });
@@ -773,6 +783,25 @@ export default function MedicationForm({
                 style={[s.input, { flex: 1 }]}
                 value={earlyWindowOverride}
                 onChangeText={setEarlyWindowOverride}
+                placeholder="Use app default"
+                placeholderTextColor="#94A3B8"
+                keyboardType="numeric"
+              />
+              <View style={s.windowUnit}>
+                <Text style={s.windowUnitText}>min</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Missed window override */}
+          <View style={s.field}>
+            <Text style={s.label}>Missed Dose Window</Text>
+            <Text style={s.hint}>Minutes after scheduled time before a dose is marked missed. Leave blank to use app default.</Text>
+            <View style={s.row}>
+              <TextInput
+                style={[s.input, { flex: 1 }]}
+                value={missedWindowOverride}
+                onChangeText={setMissedWindowOverride}
                 placeholder="Use app default"
                 placeholderTextColor="#94A3B8"
                 keyboardType="numeric"

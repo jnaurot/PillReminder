@@ -18,7 +18,7 @@ export default function NewMedicationScreen() {
       const alarm = settings.alarm_enabled
         ? { delayMin: settings.alarm_delay_minutes, type: settings.alarm_type }
         : undefined;
-      await scheduleForMedication(med, settings.missed_window_minutes, alarm);
+      await scheduleForMedication(med, med.missed_window_minutes ?? settings.missed_window_minutes, alarm);
       router.back();
       enrichMedication(med.id, med.name, id).catch(() => {});
     } finally {
