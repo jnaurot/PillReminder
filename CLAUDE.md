@@ -26,7 +26,7 @@ PillReminder is a React Native + Expo Router (file-based routing) app for managi
 
 ### Database Layer (`src/db/`)
 
-Single SQLite instance (singleton in `database.ts`, SCHEMA_VERSION = 8). Migrations run on `initDb()`. Versions < 6 drop and recreate tables; later versions use `ALTER TABLE` with try-catch (safe if column already exists).
+Encrypted SQLite instance via `@op-engineering/op-sqlite` with SQLCipher (singleton in `database.ts`, SCHEMA_VERSION = 11). The encryption key is stored in Android Keystore via `expo-secure-store` (`src/db/cryptoKey.ts`). Migrations run on `initDb()`. Versions < 6 drop and recreate tables; later versions use `ALTER TABLE` with try-catch (safe if column already exists). On first run (version = 0) the legacy unencrypted `pillreminder.db` (expo-sqlite, stored at `files/SQLite/`) is copied into the new encrypted `pillreminder_enc.db` (stored in `databases/`). The op-sqlite API uses `executeSync()` for synchronous DDL/migration and `execute()` (async) for the `CompatDB` wrapper used by all other db modules.
 
 Key modules:
 - `entities.ts` — people taking medications

@@ -213,3 +213,111 @@ npx expo-doctor
 | `android/app/src/main/java/.../AlarmActivity.kt` | Full-screen alarm UI |
 | `android/app/src/main/java/.../AlarmVibrationService.kt` | Foreground vibration service |
 | `android/app/src/main/AndroidManifest.xml` | Permissions + activity/service declarations |
+
+
+
+
+● HIPAA Applicability
+
+  First, a threshold question: HIPAA applies to covered entities (healthcare providers, insurers,
+  clearinghouses) and their business associates. A family caregiver using this privately is likely under the
+  Personal Health Record exception — HIPAA doesn't apply. But if this app were ever deployed to professional
+  caregivers employed by a healthcare organization, or licensed to care facilities, HIPAA would apply. Worth
+  deciding which you're building for.
+
+  Assuming you want to be compliant (or at least defensible):
+
+  ---
+  Current State: Not Compliant
+
+  Technical Safeguards (45 CFR §164.312)
+
+  Missing or deficient:
+
+  - Encryption at rest — SQLite database is stored as plaintext on the device. Requires SQLCipher or Android's
+  EncryptedSharedPreferences/Room encryption.
+  - Encryption in transit — Caregiver shift data sent via SMS is LZString-compressed but not encrypted.
+  Requires AES-256-GCM (or similar) before transmission.
+  - Audit controls — No record of who accessed PHI, when, or what they did. Requires an append-only audit log
+  of reads and writes to patient records.
+  - Automatic session timeout — Biometric auth fires at launch but the app doesn't re-lock after inactivity.
+  Requires a configurable inactivity timeout (typically 5–15 min).
+  - Unique user identification — Biometrics alone may not satisfy "unique user ID" requirements if multiple
+  people can unlock the device. Consider a PIN/passphrase in addition to biometrics.
+  - Secure backup/export — CSV and JSON exports are plaintext. Exports must be encrypted or access-controlled.
+  - Screenshot prevention — No FLAG_SECURE on Android windows. A screenshot of a medication schedule is a PHI
+  disclosure.
+  - Remote wipe / device loss — No mechanism to remotely delete data if a device is lost.
+
+  Existing controls (good):
+  - Biometric auth at launch
+  - No backend server (reduces attack surface significantly)
+  - Local-only storage (no cloud sync to uncontrolled third parties)
+
+  ---
+  Administrative Safeguards (45 CFR §164.308)
+  
+  - Risk analysis — Formal written assessment of threats and vulnerabilities to PHI.
+  - Security policies — Written policies for access, data handling, incident response.
+  - Workforce training — Anyone using the app in a covered context needs documented training.
+  - Contingency plan — Data backup and disaster recovery procedures.
+  - Breach notification procedure — Written plan for notifying affected individuals within 60 days of a breach.
+
+  ---
+  Business Associate Agreements (BAAs)
+
+  - RxNav / NLM API — Drug info lookups send medication names to rxnav.nlm.nih.gov. This is an HHS-operated
+  service, but a formal data use agreement or confirmation of exemption is needed.
+  - Any future third-party service that touches PHI needs a signed BAA before integration.
+
+  ---
+  Physical Safeguards (45 CFR §164.310)
+
+  - Device disposal policy — Written procedure for securely wiping devices before disposal.
+  - Workstation/device policy — Policy governing who may use devices running the app and how those devices are
+  secured.
+
+  ---
+  Priority Order (if you pursue this)
+  
+  1. Encrypt the database — Biggest gap; everything else rests on this.
+  2. Encrypt SMS transmission — Second-biggest gap; data leaves the device unprotected.
+  3. Add inactivity timeout — Low effort, high HIPAA visibility.
+  4. Add FLAG_SECURE — One line of code.
+  5. Audit logging — Moderate effort; new DB table + write on every PHI access.
+  6. Encrypt exports — Moderate effort; password-protect the backup JSON.
+  7. Administrative documentation — Doesn't require code; needs written policies.
+
+  ---
+  Bottom Line
+
+  The app is not HIPAA compliant today. The two technically significant gaps are unencrypted local storage and
+  unencrypted inter-device data transfer. Everything else is either lightweight to add or is
+  administrative/legal rather than code. Whether you need to close these gaps depends on your deployment
+  context — personal family use likely doesn't require it, but any professional or institutional use does.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
