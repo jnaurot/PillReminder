@@ -29,6 +29,7 @@ export default function SettingsScreen() {
   const [alarmEnabled, setAlarmEnabled] = useState(false);
   const [alarmDelay, setAlarmDelay] = useState('30');
   const [alarmType, setAlarmType] = useState('sound,vibration');
+  const [inactivityTimeout, setInactivityTimeout] = useState(0);
 
   useEffect(() => {
     getSettings().then((s) => {
@@ -40,6 +41,7 @@ export default function SettingsScreen() {
       setAlarmEnabled(s.alarm_enabled);
       setAlarmDelay(String(s.alarm_delay_minutes));
       setAlarmType(s.alarm_type);
+      setInactivityTimeout(s.inactivity_timeout_minutes);
       setLoading(false);
     });
   }, []);
@@ -63,6 +65,7 @@ export default function SettingsScreen() {
       setSetting('alarm_enabled', String(alarmEnabled)),
       setSetting('alarm_delay_minutes', String(ad)),
       setSetting('alarm_type', alarmType || 'sound,vibration'),
+      setSetting('inactivity_timeout_minutes', String(inactivityTimeout)),
     ]);
     await rescheduleAll();
     setSaving(false);
@@ -140,6 +143,26 @@ export default function SettingsScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.form} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
+
+        <View style={styles.field}>
+          <Text style={styles.label}>Auto-Lock</Text>
+          <Text style={styles.hint}>
+            Lock the app after returning from the background. Requires biometrics to unlock.
+          </Text>
+          <View style={styles.segRow}>
+            {([5, 10, 15, 0] as const).map((val) => (
+              <TouchableOpacity
+                key={val}
+                style={[styles.segBtn, inactivityTimeout === val && styles.segBtnActive]}
+                onPress={() => setInactivityTimeout(val)}
+              >
+                <Text style={[styles.segBtnText, inactivityTimeout === val && styles.segBtnTextActive]}>
+                  {val === 0 ? 'Never' : `${val} min`}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
 
         <View style={styles.field}>
           <Text style={styles.label}>Early Dose Window</Text>
@@ -357,6 +380,15 @@ const styles = StyleSheet.create({
   },
   unitText: { fontSize: 14, color: '#64748B', fontWeight: '600' },
   gap8: { gap: 8 },
+  segRow: { flexDirection: 'row', gap: 8 },
+  segBtn: {
+    flex: 1, paddingVertical: 10, borderRadius: 10,
+    backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E2E8F0',
+    alignItems: 'center',
+  },
+  segBtnActive: { backgroundColor: '#EEF6FF', borderColor: '#4A90D9' },
+  segBtnText: { fontSize: 13, fontWeight: '600', color: '#64748B' },
+  segBtnTextActive: { color: '#4A90D9' },
   policyOption: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
     backgroundColor: '#FFFFFF', borderRadius: 10,

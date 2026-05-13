@@ -215,9 +215,10 @@ function insertDefaultSettings(inner: DB): void {
     ['missed_window_minutes', '60'],
     ['global_missed_policy',  'none'],
     ['refill_alert_days',     '7'],
-    ['alarm_enabled',         'false'],
-    ['alarm_delay_minutes',   '30'],
-    ['alarm_type',            'sound,vibration'],
+    ['alarm_enabled',                'false'],
+    ['alarm_delay_minutes',          '30'],
+    ['alarm_type',                   'sound,vibration'],
+    ['inactivity_timeout_minutes',   '0'],
   ];
   for (const [k, v] of defaults) {
     inner.executeSync('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)', [k, v]);

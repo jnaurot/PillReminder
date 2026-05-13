@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { Stack, router } from 'expo-router';
-import { Alert, View, ActivityIndicator, Vibration } from 'react-native';
+import { Alert, AppState, View, ActivityIndicator, Vibration } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as Linking from 'expo-linking';
 import Constants from 'expo-constants';
 import { initDb, getDb } from '../src/db/database';
+import { getSettings } from '../src/db/settings';
 
 const isExpoGo = Constants.executionEnvironment === 'storeClient';
 
@@ -52,6 +53,10 @@ async function initNotifications() {
   if (granted) await rescheduleAll();
 }
 
+// Called by index.tsx after successful auth so the inactivity timer resumes.
+let _setAppReady: (() => void) | null = null;
+export function notifyAuthSuccess() { _setAppReady?.(); }
+
 // Module-level store for a cold-start notification deep-link.
 // index.tsx calls consumePendingNotifRoute() after its auth redirect.
 let _pendingNotifRoute: string | null = null;
@@ -90,6 +95,35 @@ export default function RootLayout() {
   const [ready, setReady] = useState(false);
   const listenerRef = useRef<{ remove(): void } | null>(null);
   const deepLinkListenerRef = useRef<{ remove(): void } | null>(null);
+  const backgroundedAtRef = useRef<number | null>(null);
+  const appReadyRef = useRef(false);
+
+  // Expose a way for index.tsx to re-arm the inactivity timer after auth.
+  useEffect(() => {
+    _setAppReady = () => { appReadyRef.current = true; };
+    return () => { _setAppReady = null; };
+  }, []);
+
+  // Inactivity timeout: lock app after returning from background if elapsed >= setting.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'background' || nextState === 'inactive') {
+        backgroundedAtRef.current = Date.now();
+      } else if (nextState === 'active') {
+        const since = backgroundedAtRef.current;
+        backgroundedAtRef.current = null;
+        if (!appReadyRef.current || since === null) return;
+        const elapsed = Date.now() - since;
+        getSettings().then((s) => {
+          if (s.inactivity_timeout_minutes > 0 && elapsed >= s.inactivity_timeout_minutes * 60_000) {
+            appReadyRef.current = false;
+            router.replace('/');
+          }
+        }).catch(() => {});
+      }
+    });
+    return () => sub.remove();
+  }, []);
 
   useEffect(() => {
     async function init() {
@@ -147,6 +181,7 @@ export default function RootLayout() {
         );
       }
 
+      appReadyRef.current = true;
       setReady(true);
     }
     init();

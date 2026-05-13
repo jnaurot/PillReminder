@@ -3,9 +3,10 @@ import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { router } from 'expo-router';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { StatusBar } from 'expo-status-bar';
-import { consumePendingNotifRoute, consumePendingDeepLink } from './_layout';
+import { consumePendingNotifRoute, consumePendingDeepLink, notifyAuthSuccess } from './_layout';
 
 function navigateAfterAuth() {
+  notifyAuthSuccess();
   const notifRoute = consumePendingNotifRoute();
   const deepLink = consumePendingDeepLink();
 
