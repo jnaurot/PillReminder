@@ -1,6 +1,65 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
+import * as ExpoCrypto from 'expo-crypto';
+import CryptoJS from 'crypto-js';
 import { getDb } from './database';
+
+// ─── Encryption helpers (AES-256-CBC + PBKDF2) ────────────────────────────────
+
+const ITERATIONS = 100_000;
+const KEY_SIZE   = 256 / 32; // words
+
+interface EncryptedEnvelope {
+  _enc: true;
+  v: 1;
+  salt: string;
+  iv: string;
+  ct: string;
+}
+
+// crypto-js's WordArray.random() calls window.crypto which doesn't exist in RN.
+// Use expo-crypto for secure random bytes instead.
+function toWordArray(bytes: Uint8Array): CryptoJS.lib.WordArray {
+  const words: number[] = [];
+  for (let i = 0; i < bytes.length; i += 4) {
+    words.push(
+      ((bytes[i] ?? 0) << 24) | ((bytes[i + 1] ?? 0) << 16) |
+      ((bytes[i + 2] ?? 0) << 8)  | (bytes[i + 3] ?? 0),
+    );
+  }
+  return CryptoJS.lib.WordArray.create(words as any, bytes.length);
+}
+
+export async function encryptBackupPayload(json: string, password: string): Promise<string> {
+  const salt = toWordArray(await ExpoCrypto.getRandomBytesAsync(16));
+  const iv   = toWordArray(await ExpoCrypto.getRandomBytesAsync(16));
+  const key  = CryptoJS.PBKDF2(password, salt, { keySize: KEY_SIZE, iterations: ITERATIONS });
+  const ct   = CryptoJS.AES.encrypt(json, key, { iv, mode: CryptoJS.mode.CBC, padding: CryptoJS.pad.Pkcs7 });
+  const envelope: EncryptedEnvelope = {
+    _enc: true, v: 1,
+    salt: salt.toString(CryptoJS.enc.Hex),
+    iv:   iv.toString(CryptoJS.enc.Hex),
+    ct:   ct.toString(),
+  };
+  return JSON.stringify(envelope);
+}
+
+export function decryptBackupPayload(encryptedJson: string, password: string): string {
+  let envelope: EncryptedEnvelope;
+  try {
+    envelope = JSON.parse(encryptedJson);
+  } catch {
+    throw new Error('Invalid backup file format.');
+  }
+  if (!envelope._enc) throw new Error('File is not encrypted.');
+  const salt = CryptoJS.enc.Hex.parse(envelope.salt);
+  const iv   = CryptoJS.enc.Hex.parse(envelope.iv);
+  const key  = CryptoJS.PBKDF2(password, salt, { keySize: KEY_SIZE, iterations: ITERATIONS });
+  const dec  = CryptoJS.AES.decrypt(envelope.ct, key, { iv, mode: CryptoJS.mode.CBC, padding: CryptoJS.pad.Pkcs7 });
+  const json = dec.toString(CryptoJS.enc.Utf8);
+  if (!json) throw new Error('Incorrect password.');
+  return json;
+}
 
 function csvCell(val: string | number | null | undefined): string {
   if (val == null) return '';
@@ -48,7 +107,7 @@ export async function exportCSV(): Promise<void> {
 
 // ─── JSON backup export ───────────────────────────────────────────────────────
 
-export async function exportBackup(): Promise<void> {
+export async function exportBackup(password: string): Promise<void> {
   const db = getDb();
   const [entities, medications, prescriptions, dose_logs, settings] = await Promise.all([
     db.getAllAsync('SELECT * FROM entities'),
@@ -69,10 +128,9 @@ export async function exportBackup(): Promise<void> {
     settings,
   };
 
+  const encrypted = await encryptBackupPayload(JSON.stringify(backup), password);
   const path = `${FileSystem.cacheDirectory}pillreminder-backup-${todayTag()}.json`;
-  await FileSystem.writeAsStringAsync(path, JSON.stringify(backup, null, 2), {
-    encoding: FileSystem.EncodingType.UTF8,
-  });
+  await FileSystem.writeAsStringAsync(path, encrypted, { encoding: FileSystem.EncodingType.UTF8 });
   await Sharing.shareAsync(path, { mimeType: 'application/json', dialogTitle: 'Export Backup' });
 }
 
@@ -84,9 +142,14 @@ export interface ImportResult {
   logs: number;
 }
 
-export async function importBackup(uri: string): Promise<ImportResult> {
+export async function importBackup(uri: string, password: string): Promise<ImportResult> {
   const content = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.UTF8 });
-  const backup = JSON.parse(content);
+
+  let parsed: any;
+  try { parsed = JSON.parse(content); } catch { throw new Error('Invalid backup file format.'); }
+
+  // Detect encrypted envelope
+  const backup = parsed._enc ? JSON.parse(decryptBackupPayload(content, password)) : parsed;
 
   if (
     backup._app !== 'PillReminder' ||
@@ -99,8 +162,8 @@ export async function importBackup(uri: string): Promise<ImportResult> {
 
   const db = getDb();
 
-  await db.withTransactionAsync(async () => {
-    // Delete in reverse FK order — no need to disable foreign_keys inside a transaction.
+  await db.execAsync('BEGIN');
+  try {
     await db.runAsync('DELETE FROM dose_logs');
     await db.runAsync('DELETE FROM prescriptions');
     await db.runAsync('DELETE FROM medications');
@@ -119,12 +182,14 @@ export async function importBackup(uri: string): Promise<ImportResult> {
       await db.runAsync(
         `INSERT INTO medications
          (id, entity_id, name, dosage, pills_per_dose, schedule, food_requirement,
-          interactions, missed_policy, early_window_minutes, color, notes, created_at, updated_at, deleted_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          interactions, missed_policy, early_window_minutes, missed_window_minutes,
+          color, notes, created_at, updated_at, deleted_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [r.id, r.entity_id, r.name, r.dosage, r.pills_per_dose ?? 1,
          r.schedule ?? '{"type":"fixed_times","times":[]}',
          r.food_requirement ?? null, r.interactions ?? '[]',
          r.missed_policy ?? null, r.early_window_minutes ?? null,
+         r.missed_window_minutes ?? null,
          r.color ?? '#4A90D9', r.notes ?? null,
          r.created_at, r.updated_at, r.deleted_at ?? null],
       );
@@ -155,7 +220,12 @@ export async function importBackup(uri: string): Promise<ImportResult> {
         [r.key, r.value],
       );
     }
-  });
+
+    await db.execAsync('COMMIT');
+  } catch (err) {
+    await db.execAsync('ROLLBACK');
+    throw err;
+  }
 
   return {
     entities: backup.entities.length,

@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
   StyleSheet, ScrollView, Alert, ActivityIndicator,
-  KeyboardAvoidingView, Platform,
+  KeyboardAvoidingView, Platform, Modal,
 } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -13,6 +13,142 @@ import { exportCSV, exportBackup, importBackup } from '../src/db/backup';
 import { rescheduleAll } from '../src/notifications/scheduler';
 import { setFlagSecure as applyFlagSecure } from '../src/native/flagSecure';
 
+// ─── Password modal ───────────────────────────────────────────────────────────
+
+interface PasswordModalProps {
+  visible: boolean;
+  mode: 'export' | 'import';
+  onConfirm: (password: string) => Promise<void>;
+  onCancel: () => void;
+}
+
+function PasswordModal({ visible, mode, onConfirm, onCancel }: PasswordModalProps) {
+  const [pw, setPw] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [busy, setBusy] = useState(false);
+  const confirmRef = useRef<TextInput>(null);
+
+  function reset() { setPw(''); setConfirm(''); setBusy(false); }
+
+  function handleCancel() { reset(); onCancel(); }
+
+  async function handleConfirm() {
+    if (!pw.trim()) { Alert.alert('Password required', 'Enter a password for the backup.'); return; }
+    if (mode === 'export' && pw !== confirm) { Alert.alert('Passwords do not match', 'Re-enter the same password in both fields.'); return; }
+    const value = pw;
+    setBusy(true);
+    try {
+      await onConfirm(value);
+      reset();
+    } catch (e: any) {
+      setBusy(false);
+      Alert.alert(mode === 'export' ? 'Export failed' : 'Import failed', e?.message ?? 'Operation failed.');
+    }
+  }
+
+  const busyLabel = mode === 'export' ? 'Encrypting…' : 'Decrypting…';
+
+  return (
+    <Modal visible={visible} animationType="fade" transparent onRequestClose={busy ? undefined : handleCancel}>
+      <View style={pm.backdrop}>
+        <SafeAreaView style={pm.safeTop} edges={['top']}>
+        <View style={pm.sheet}>
+          <Text style={pm.title}>
+            {mode === 'export' ? 'Set Backup Password' : 'Enter Backup Password'}
+          </Text>
+
+          {busy ? (
+            <View style={pm.busyRow}>
+              <ActivityIndicator size="large" color="#4A90D9" />
+              <Text style={pm.busyText}>{busyLabel}</Text>
+            </View>
+          ) : (
+            <>
+              <Text style={pm.hint}>
+                {mode === 'export'
+                  ? 'The backup file will be AES-256 encrypted with this password. You will need it to restore.'
+                  : 'Enter the password used when this backup was exported.'}
+              </Text>
+
+              <Text style={pm.label}>Password</Text>
+              <TextInput
+                style={pm.input}
+                value={pw}
+                onChangeText={setPw}
+                secureTextEntry
+                placeholder="Enter password"
+                placeholderTextColor="#94A3B8"
+                autoFocus
+                returnKeyType={mode === 'export' ? 'next' : 'done'}
+                onSubmitEditing={() => mode === 'export' ? confirmRef.current?.focus() : handleConfirm()}
+              />
+
+              {mode === 'export' && (
+                <>
+                  <Text style={pm.label}>Confirm Password</Text>
+                  <TextInput
+                    ref={confirmRef}
+                    style={pm.input}
+                    value={confirm}
+                    onChangeText={setConfirm}
+                    secureTextEntry
+                    placeholder="Re-enter password"
+                    placeholderTextColor="#94A3B8"
+                    returnKeyType="done"
+                    onSubmitEditing={handleConfirm}
+                  />
+                </>
+              )}
+
+              <View style={pm.actions}>
+                <TouchableOpacity style={pm.cancelBtn} onPress={handleCancel}>
+                  <Text style={pm.cancelText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={pm.confirmBtn} onPress={handleConfirm}>
+                  <Text style={pm.confirmText}>{mode === 'export' ? 'Export' : 'Import'}</Text>
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
+        </View>
+        </SafeAreaView>
+      </View>
+    </Modal>
+  );
+}
+
+const pm = StyleSheet.create({
+  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-start' },
+  safeTop: { backgroundColor: '#FFF', borderBottomLeftRadius: 20, borderBottomRightRadius: 20 },
+  sheet: {
+    padding: 24, paddingBottom: 28, gap: 12,
+  },
+  title: { fontSize: 18, fontWeight: '700', color: '#1A2F5A' },
+  hint: { fontSize: 13, color: '#64748B' },
+  label: { fontSize: 12, fontWeight: '600', color: '#475569', textTransform: 'uppercase', letterSpacing: 0.5 },
+  input: {
+    backgroundColor: '#F8FAFC', borderRadius: 10,
+    borderWidth: 1, borderColor: '#E2E8F0',
+    paddingHorizontal: 14, paddingVertical: 12,
+    fontSize: 16, color: '#1A2F5A',
+  },
+  actions: { flexDirection: 'row', gap: 12, marginTop: 4 },
+  cancelBtn: {
+    flex: 1, paddingVertical: 13, borderRadius: 10,
+    borderWidth: 1, borderColor: '#CBD5E1', alignItems: 'center',
+  },
+  cancelText: { color: '#64748B', fontWeight: '600' },
+  confirmBtn: {
+    flex: 1, paddingVertical: 13, borderRadius: 10,
+    backgroundColor: '#4A90D9', alignItems: 'center',
+  },
+  confirmText: { color: '#FFF', fontWeight: '600' },
+  busyRow: { alignItems: 'center', paddingVertical: 24, gap: 16 },
+  busyText: { fontSize: 15, color: '#64748B', fontWeight: '500' },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 const POLICY_OPTIONS: { value: AppSettings['global_missed_policy']; label: string; desc: string }[] = [
   { value: 'none',      label: 'Flexible',           desc: 'User chooses take or skip freely' },
   { value: 'catch_up',  label: 'Catch-up double dose', desc: 'Missed dose logged automatically when next dose is taken' },
@@ -22,6 +158,9 @@ const POLICY_OPTIONS: { value: AppSettings['global_missed_policy']; label: strin
 export default function SettingsScreen() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const pendingImportUri = useRef<string | null>(null);
   const [earlyWindow, setEarlyWindow] = useState('30');
   const [missedWindow, setMissedWindow] = useState('60');
   const [policy, setPolicy] = useState<AppSettings['global_missed_policy']>('none');
@@ -85,12 +224,13 @@ export default function SettingsScreen() {
     }
   }
 
-  async function handleExportBackup() {
-    try {
-      await exportBackup();
-    } catch (e: any) {
-      Alert.alert('Export failed', e?.message ?? 'Could not export backup.');
-    }
+  function handleExportBackup() {
+    setShowExportModal(true);
+  }
+
+  async function handleExportWithPassword(password: string): Promise<void> {
+    await exportBackup(password); // throws on failure; modal catches and shows error
+    setShowExportModal(false);
   }
 
   async function handleImportBackup() {
@@ -100,34 +240,31 @@ export default function SettingsScreen() {
         copyToCacheDirectory: true,
       });
       if (result.canceled) return;
-
-      const uri = result.assets[0].uri;
+      pendingImportUri.current = result.assets[0].uri;
       Alert.alert(
         'Import backup',
         'This will replace ALL existing data with the backup. This cannot be undone. Continue?',
         [
           { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Import',
-            style: 'destructive',
-            onPress: async () => {
-              try {
-                const counts = await importBackup(uri);
-                await rescheduleAll();
-                Alert.alert(
-                  'Import complete',
-                  `Restored ${counts.entities} people, ${counts.medications} medications, ${counts.logs} dose logs.`,
-                );
-              } catch (e: any) {
-                Alert.alert('Import failed', e?.message ?? 'Could not read backup file.');
-              }
-            },
-          },
-        ]
+          { text: 'Continue', onPress: () => setShowImportModal(true) },
+        ],
       );
     } catch (e: any) {
       Alert.alert('Error', e?.message ?? 'Could not open file picker.');
     }
+  }
+
+  async function handleImportWithPassword(password: string): Promise<void> {
+    const uri = pendingImportUri.current;
+    if (!uri) return;
+    pendingImportUri.current = null;
+    const counts = await importBackup(uri, password); // throws on wrong password or bad file
+    await rescheduleAll();
+    setShowImportModal(false);
+    Alert.alert(
+      'Import complete',
+      `Restored ${counts.entities} people, ${counts.medications} medications, ${counts.logs} dose logs.`,
+    );
   }
 
   if (loading) {
@@ -370,6 +507,19 @@ export default function SettingsScreen() {
 
       </ScrollView>
       </KeyboardAvoidingView>
+
+      <PasswordModal
+        visible={showExportModal}
+        mode="export"
+        onConfirm={handleExportWithPassword}
+        onCancel={() => setShowExportModal(false)}
+      />
+      <PasswordModal
+        visible={showImportModal}
+        mode="import"
+        onConfirm={handleImportWithPassword}
+        onCancel={() => setShowImportModal(false)}
+      />
     </SafeAreaView>
   );
 }

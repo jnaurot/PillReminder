@@ -11,6 +11,8 @@
   },
   "dependencies": {
     "@op-engineering/op-sqlite": "^15.2.12",
+    "@types/crypto-js": "^4.2.2",
+    "crypto-js": "^4.2.0",
     "expo": "~54.0.33",
     "expo-background-fetch": "~14.0.9",
     "expo-constants": "~18.0.13",
