@@ -10,6 +10,7 @@ export interface AppSettings {
   alarm_delay_minutes: number;
   alarm_type: string; // comma-separated: 'sound', 'vibration'
   inactivity_timeout_minutes: number; // 0 = Never
+  flag_secure: boolean;
 }
 
 const DEFAULTS: AppSettings = {
@@ -22,6 +23,7 @@ const DEFAULTS: AppSettings = {
   alarm_delay_minutes: 30,
   alarm_type: 'sound,vibration',
   inactivity_timeout_minutes: 0,
+  flag_secure: false,
 };
 
 export async function getSettings(): Promise<AppSettings> {
@@ -51,6 +53,7 @@ export async function getSettings(): Promise<AppSettings> {
     inactivity_timeout_minutes: map.inactivity_timeout_minutes
       ? parseInt(map.inactivity_timeout_minutes, 10)
       : DEFAULTS.inactivity_timeout_minutes,
+    flag_secure: map.flag_secure === 'true',
   };
 }
 

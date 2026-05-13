@@ -219,6 +219,7 @@ function insertDefaultSettings(inner: DB): void {
     ['alarm_delay_minutes',          '30'],
     ['alarm_type',                   'sound,vibration'],
     ['inactivity_timeout_minutes',   '0'],
+    ['flag_secure',                  'false'],
   ];
   for (const [k, v] of defaults) {
     inner.executeSync('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)', [k, v]);

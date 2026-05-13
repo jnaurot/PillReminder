@@ -6,6 +6,7 @@ import * as Linking from 'expo-linking';
 import Constants from 'expo-constants';
 import { initDb, getDb } from '../src/db/database';
 import { getSettings } from '../src/db/settings';
+import { setFlagSecure } from '../src/native/flagSecure';
 
 const isExpoGo = Constants.executionEnvironment === 'storeClient';
 
@@ -128,6 +129,7 @@ export default function RootLayout() {
   useEffect(() => {
     async function init() {
       await initDb();
+      getSettings().then((s) => setFlagSecure(s.flag_secure)).catch(() => {});
       import('../src/services/rxnorm').then(({ enrichAllUnenriched }) =>
         enrichAllUnenriched().catch(() => {})
       );

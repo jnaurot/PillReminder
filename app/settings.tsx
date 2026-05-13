@@ -11,6 +11,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import { getSettings, setSetting, type AppSettings } from '../src/db/settings';
 import { exportCSV, exportBackup, importBackup } from '../src/db/backup';
 import { rescheduleAll } from '../src/notifications/scheduler';
+import { setFlagSecure as applyFlagSecure } from '../src/native/flagSecure';
 
 const POLICY_OPTIONS: { value: AppSettings['global_missed_policy']; label: string; desc: string }[] = [
   { value: 'none',      label: 'Flexible',           desc: 'User chooses take or skip freely' },
@@ -30,6 +31,7 @@ export default function SettingsScreen() {
   const [alarmDelay, setAlarmDelay] = useState('30');
   const [alarmType, setAlarmType] = useState('sound,vibration');
   const [inactivityTimeout, setInactivityTimeout] = useState(0);
+  const [flagSecure, setFlagSecure] = useState(false);
 
   useEffect(() => {
     getSettings().then((s) => {
@@ -42,6 +44,7 @@ export default function SettingsScreen() {
       setAlarmDelay(String(s.alarm_delay_minutes));
       setAlarmType(s.alarm_type);
       setInactivityTimeout(s.inactivity_timeout_minutes);
+      setFlagSecure(s.flag_secure);
       setLoading(false);
     });
   }, []);
@@ -66,8 +69,10 @@ export default function SettingsScreen() {
       setSetting('alarm_delay_minutes', String(ad)),
       setSetting('alarm_type', alarmType || 'sound,vibration'),
       setSetting('inactivity_timeout_minutes', String(inactivityTimeout)),
+      setSetting('flag_secure', String(flagSecure)),
     ]);
     await rescheduleAll();
+    applyFlagSecure(flagSecure);
     setSaving(false);
     Alert.alert('Saved', 'Default settings updated.');
   }
@@ -162,6 +167,24 @@ export default function SettingsScreen() {
               </TouchableOpacity>
             ))}
           </View>
+        </View>
+
+        <View style={styles.field}>
+          <Text style={styles.label}>Screenshot Protection</Text>
+          <Text style={styles.hint}>
+            Blocks screenshots and hides app preview in the recent-apps switcher.
+          </Text>
+          <TouchableOpacity
+            style={[styles.policyOption, flagSecure && styles.policyOptionActive]}
+            onPress={() => setFlagSecure(!flagSecure)}
+          >
+            <View style={[styles.radioCircle, flagSecure && styles.radioCircleActive]}>
+              {flagSecure && <View style={styles.radioDot} />}
+            </View>
+            <Text style={[styles.policyLabel, flagSecure && styles.policyLabelActive]}>
+              {flagSecure ? 'Protection enabled' : 'Protection disabled'}
+            </Text>
+          </TouchableOpacity>
         </View>
 
         <View style={styles.field}>
