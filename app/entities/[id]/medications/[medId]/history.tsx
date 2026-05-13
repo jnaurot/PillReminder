@@ -7,6 +7,8 @@ import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getMedication } from '../../../../../src/db/medications';
 import { getLogsForMedication, deleteLog, updateLogNote } from '../../../../../src/db/doseLogs';
+import { getCaregivers } from '../../../../../src/db/caregivers';
+import { getSettings } from '../../../../../src/db/settings';
 import type { DoseLog, Medication } from '../../../../../src/types';
 import { dateToStr, nDaysAgo } from '../../../../../src/utils/dateTime';
 
@@ -34,16 +36,22 @@ export default function MedicationHistoryScreen() {
   const { id, medId } = useLocalSearchParams<{ id: string; medId: string }>();
   const [medication, setMedication] = useState<Medication | null>(null);
   const [sections, setSections] = useState<LogSection[]>([]);
+  const [caregiverNames, setCaregiverNames] = useState<Map<string, string>>(new Map());
+  const [primaryName, setPrimaryName] = useState('Primary Caregiver');
   const [loading, setLoading] = useState(true);
 
   async function load() {
     const today = dateToStr(nDaysAgo(0));
     const from = dateToStr(nDaysAgo(89));
-    const [med, logs] = await Promise.all([
+    const [med, logs, caregivers, settings] = await Promise.all([
       getMedication(medId),
       getLogsForMedication(medId, `${from}T00:00:00`, `${today}T23:59:59`),
+      getCaregivers(),
+      getSettings(),
     ]);
     setMedication(med);
+    setCaregiverNames(new Map(caregivers.map((c) => [c.id, c.name])));
+    setPrimaryName(settings.primary_name);
 
     // Group by calendar date, newest first
     const byDate = new Map<string, DoseLog[]>();
@@ -148,6 +156,11 @@ export default function MedicationHistoryScreen() {
                   {log.scheduled_at && (
                     <Text style={styles.logScheduled}>Scheduled {fmtTime(log.scheduled_at)}</Text>
                   )}
+                  <Text style={styles.logLogger}>
+                    {log.caregiver_id
+                      ? (caregiverNames.get(log.caregiver_id) ?? 'Caregiver')
+                      : primaryName}
+                  </Text>
                   {log.notes ? <Text style={styles.logNote}>📝 {log.notes}</Text> : null}
                 </View>
                 <Text style={styles.hint}>hold</Text>
@@ -193,6 +206,7 @@ const styles = StyleSheet.create({
   logStatus:    { fontSize: 14, fontWeight: '600', color: '#1A2F5A' },
   logTime:      { fontSize: 13, color: '#4A90D9' },
   logScheduled: { fontSize: 12, color: '#94A3B8' },
+  logLogger:    { fontSize: 11, color: '#94A3B8', marginTop: 1 },
   logNote:      { fontSize: 12, color: '#64748B', fontStyle: 'italic', marginTop: 2 },
   hint:         { fontSize: 10, color: '#CBD5E1', alignSelf: 'center' },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10, paddingHorizontal: 40 },

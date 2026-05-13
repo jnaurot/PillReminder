@@ -129,6 +129,7 @@ export interface DoseLog {
   skipped: number;    // 0 | 1
   is_catchup: number; // 0 | 1
   notes: string | null;
+  caregiver_id: string | null; // null = primary user
   created_at: string;
 }
 

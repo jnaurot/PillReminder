@@ -2,6 +2,7 @@ import * as Crypto from 'expo-crypto';
 import { getDb } from './database';
 import { getMedications } from './medications';
 import { getSettings } from './settings';
+import { getActiveShift } from './caregivers';
 import { parseSchedule } from '../types';
 import type { DoseLog, Medication, MedicationSchedule } from '../types';
 export { todayStr } from '../utils/dateTime';
@@ -109,8 +110,8 @@ export async function getDosesForDate(
     if (createdDateStr > dateStr) continue;
 
     const schedule: MedicationSchedule = parseSchedule(med.schedule);
-    const earlyWindow = med.early_window_minutes ?? settings.early_window_minutes;
-    const missedWindow = settings.missed_window_minutes;
+    const earlyWindow  = med.early_window_minutes  ?? settings.early_window_minutes;
+    const missedWindow = med.missed_window_minutes ?? settings.missed_window_minutes;
     const policy = (med.missed_policy ?? settings.global_missed_policy) as
       'none' | 'catch_up' | 'must_skip';
 
@@ -245,6 +246,23 @@ export async function getMissedDosesToday(
   return missed;
 }
 
+// ─── Resolve who is logging (null = primary user) ────────────────────────────
+
+async function resolveLoggerId(medicationId: string): Promise<string | null> {
+  const shift = await getActiveShift();
+  if (!shift) return null;
+  const db = getDb();
+  const med = await db.getFirstAsync<{ entity_id: string }>(
+    'SELECT entity_id FROM medications WHERE id = ?', [medicationId]
+  );
+  if (!med) return null;
+  const entityIds: string[] = JSON.parse(shift.entity_ids);
+  if (entityIds[0] === '*' || entityIds.includes(med.entity_id)) {
+    return shift.caregiver_id;
+  }
+  return null;
+}
+
 // ─── Log a dose taken (with optional catch-up) ────────────────────────────────
 
 // Returns the appropriate taken_at for a scheduled slot.
@@ -265,6 +283,7 @@ async function upsertLog(
   skipped: 0 | 1,
   isCatchup: 0 | 1,
   note: string | null = null,
+  caregiverId: string | null = null,
 ): Promise<DoseLog> {
   const db = getDb();
   const existing = await db.getFirstAsync<DoseLog>(
@@ -273,10 +292,10 @@ async function upsertLog(
   );
   if (existing) {
     await db.runAsync(
-      `UPDATE dose_logs SET taken_at = ?, skipped = ?, is_catchup = ?, created_at = ? WHERE id = ?`,
-      [skipped ? null : takenAt, skipped, isCatchup, recordedAt, existing.id]
+      `UPDATE dose_logs SET taken_at = ?, skipped = ?, is_catchup = ?, caregiver_id = ?, created_at = ? WHERE id = ?`,
+      [skipped ? null : takenAt, skipped, isCatchup, caregiverId, recordedAt, existing.id]
     );
-    return { ...existing, taken_at: skipped ? null : takenAt, skipped, is_catchup: isCatchup };
+    return { ...existing, taken_at: skipped ? null : takenAt, skipped, is_catchup: isCatchup, caregiver_id: caregiverId };
   }
   const log: DoseLog = {
     id: uuidv4(),
@@ -285,14 +304,14 @@ async function upsertLog(
     taken_at: skipped ? null : takenAt,
     skipped,
     is_catchup: isCatchup,
-    notes: null,
+    notes: note,
+    caregiver_id: caregiverId,
     created_at: recordedAt,
   };
-  log.notes = note;
   await db.runAsync(
-    `INSERT INTO dose_logs (id, medication_id, scheduled_at, taken_at, skipped, is_catchup, notes, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [log.id, log.medication_id, log.scheduled_at, log.taken_at, log.skipped, log.is_catchup, note, log.created_at]
+    `INSERT INTO dose_logs (id, medication_id, scheduled_at, taken_at, skipped, is_catchup, notes, caregiver_id, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [log.id, log.medication_id, log.scheduled_at, log.taken_at, log.skipped, log.is_catchup, note, caregiverId, log.created_at]
   );
   return log;
 }
@@ -305,9 +324,10 @@ export async function logDoseTaken(
 ): Promise<void> {
   const recordedAt = now();
   const sat = scheduledAtStr ?? recordedAt;
-  await upsertLog(medicationId, sat, takenAtFor(sat, recordedAt), recordedAt, 0, 0, note ?? null);
+  const caregiverId = await resolveLoggerId(medicationId);
+  await upsertLog(medicationId, sat, takenAtFor(sat, recordedAt), recordedAt, 0, 0, note ?? null, caregiverId);
   if (catchUpScheduledAt) {
-    await upsertLog(medicationId, catchUpScheduledAt, takenAtFor(catchUpScheduledAt, recordedAt), recordedAt, 0, 1);
+    await upsertLog(medicationId, catchUpScheduledAt, takenAtFor(catchUpScheduledAt, recordedAt), recordedAt, 0, 1, null, caregiverId);
   }
 }
 
@@ -316,7 +336,8 @@ export async function logDoseSkipped(
   scheduledAtStr: string,
 ): Promise<void> {
   const recordedAt = now();
-  await upsertLog(medicationId, scheduledAtStr, scheduledAtStr, recordedAt, 1, 0);
+  const caregiverId = await resolveLoggerId(medicationId);
+  await upsertLog(medicationId, scheduledAtStr, scheduledAtStr, recordedAt, 1, 0, null, caregiverId);
 }
 
 // ─── All entities' doses for a date ──────────────────────────────────────────

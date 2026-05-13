@@ -171,6 +171,7 @@ export default function SettingsScreen() {
   const [alarmType, setAlarmType] = useState('sound,vibration');
   const [inactivityTimeout, setInactivityTimeout] = useState(0);
   const [flagSecure, setFlagSecure] = useState(false);
+  const [primaryName, setPrimaryName] = useState('Primary Caregiver');
 
   useEffect(() => {
     getSettings().then((s) => {
@@ -184,6 +185,7 @@ export default function SettingsScreen() {
       setAlarmType(s.alarm_type);
       setInactivityTimeout(s.inactivity_timeout_minutes);
       setFlagSecure(s.flag_secure);
+      setPrimaryName(s.primary_name);
       setLoading(false);
     });
   }, []);
@@ -209,6 +211,7 @@ export default function SettingsScreen() {
       setSetting('alarm_type', alarmType || 'sound,vibration'),
       setSetting('inactivity_timeout_minutes', String(inactivityTimeout)),
       setSetting('flag_secure', String(flagSecure)),
+      setSetting('primary_name', primaryName.trim() || 'Primary Caregiver'),
     ]);
     await rescheduleAll();
     applyFlagSecure(flagSecure);
@@ -449,8 +452,18 @@ export default function SettingsScreen() {
         </View>
 
         <View style={styles.field}>
-          <Text style={styles.label}>My Phone Number</Text>
+          <Text style={styles.label}>My Information</Text>
           <Text style={styles.hint}>
+            Your name appears in dose history to identify who logged each entry.
+          </Text>
+          <TextInput
+            style={styles.input}
+            value={primaryName}
+            onChangeText={setPrimaryName}
+            placeholder="Primary Caregiver"
+            placeholderTextColor="#CBD5E1"
+          />
+          <Text style={[styles.hint, { marginTop: 4 }]}>
             Your number is embedded in caregiver invites so the caregiver's app can send you
             dose updates. Required for full deep-link invites.
           </Text>

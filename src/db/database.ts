@@ -4,7 +4,7 @@ import { openDatabaseSync } from 'expo-sqlite';
 import * as FileSystem from 'expo-file-system/legacy';
 import { getOrCreateDbKey } from './cryptoKey';
 
-const SCHEMA_VERSION = 11;
+const SCHEMA_VERSION = 12;
 const ENC_DB_NAME   = 'pillreminder_enc.db';
 const LEGACY_DB_NAME = 'pillreminder.db';
 
@@ -220,6 +220,7 @@ function insertDefaultSettings(inner: DB): void {
     ['alarm_type',                   'sound,vibration'],
     ['inactivity_timeout_minutes',   '0'],
     ['flag_secure',                  'false'],
+    ['primary_name',                 'Primary Caregiver'],
   ];
   for (const [k, v] of defaults) {
     inner.executeSync('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)', [k, v]);
@@ -260,6 +261,7 @@ export async function initDb(): Promise<void> {
   addCol('medications', 'drug_info',            'TEXT');
   addCol('medications', 'pill_appearance',      'TEXT');
   addCol('medications', 'missed_window_minutes', 'INTEGER');
+  addCol('dose_logs',   'caregiver_id',         'TEXT');
 
   // Incremental migrations on existing encrypted DB.
   if (currentVersion > 0) {
