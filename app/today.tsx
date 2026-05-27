@@ -27,7 +27,13 @@ export default function TodayScreen() {
 
   const load = useCallback(async () => {
     const [all, shift] = await Promise.all([getAllDosesForDate(date), getActiveShift()]);
-    setSections(all.map((e) => ({ ...e, data: e.doses })));
+    setSections(all.map((e) => ({
+      ...e,
+      data: [...e.doses].sort((a, b) =>
+        (a.scheduledAt ?? '￿').localeCompare(b.scheduledAt ?? '￿') ||
+        a.medication.name.localeCompare(b.medication.name)
+      ),
+    })));
     setActiveShift(shift);
 
     // Build the set of entity IDs currently delegated to a caregiver.
