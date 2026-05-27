@@ -136,7 +136,8 @@ Custom Kotlin native modules for missed-dose alarms with full-screen activity + 
 }
 ```
 
----
+---------------------------------------------------------------------
+
 
 ## Pending Tasks / Open Issues
 
@@ -215,7 +216,35 @@ npx expo-doctor
 | `android/app/src/main/AndroidManifest.xml` | Permissions + activity/service declarations |
 
 
+----------------------------------------------------------------------------------
+Build
+● Android Studio's "Run App" is good enough for development — and actually faster. Here's the distinction:
 
+  Android Studio Run App (development)
+  - Builds a thin APK that loads the JS bundle from Metro at runtime over USB
+  - You need npx expo start running in a terminal, and adb reverse tcp:8081 tcp:8081 once per USB session
+  - Any JS/TSX change is live on the next reload (shake → Reload, or r in the Metro terminal)
+  - No export:embed needed — Metro serves the latest code directly
+  
+  export:embed + gradlew (standalone APK)
+  - Bakes the JS bundle into the APK so it needs no computer or Metro server
+  - Required when sharing with someone else, or testing the exact binary that would ship
+  - Slower to iterate
+  
+  The reason you didn't see changes is that you installed the standalone APK we built earlier for the migration
+   testing, and then opened that — not the Android Studio / Metro version.
+
+  Run this once to reconnect Metro:
+  adb reverse tcp:8081 tcp:8081
+
+  Then in Android Studio hit Run App, and in a separate terminal:
+  cd /home/james/Projects/PillReminder && npx expo start
+
+  From then on, JS changes show up with a shake → Reload. No rebuild needed until you change native code
+  (Kotlin, AndroidManifest, package.json native deps).
+
+
+-------------------------------------------------------------------------------------------
 
 ● HIPAA Applicability
 
@@ -295,6 +324,99 @@ npx expo-doctor
   unencrypted inter-device data transfer. Everything else is either lightweight to add or is
   administrative/legal rather than code. Whether you need to close these gaps depends on your deployment
   context — personal family use likely doesn't require it, but any professional or institutional use does.
+  
+  
+  HIPAA Continued
+ ● This is worth being precise about. First, an important framing point: HIPAA technically applies to covered 
+  entities (healthcare providers, health plans, clearinghouses) and their business associates — not to
+  individuals managing their own or their family's health data. If this app is used by a home health aide
+  employed by an agency, or a professional caregiver working under a covered entity, HIPAA applies. If it's a
+  family member managing a parent's medications, it legally doesn't. The assessment below assumes the more
+  demanding scenario.
+
+  ---
+  Covered
+
+  Technical Safeguards (§164.312)
+
+  - Access control — Biometric authentication (Face ID / fingerprint) gates every app entry
+  - Automatic logoff — Inactivity timeout (5/10/15 min) locks the app after backgrounding
+  - Encryption at rest — SQLCipher AES-256 encrypted database with key stored in Android Keystore / iOS Secure
+  Enclave
+  - Encrypted backups — AES-256/PBKDF2 backup exports; an unprotected plaintext backup cannot be created
+  - Integrity controls — SQLite foreign key enforcement, transactions with rollback, no silent data corruption
+  - Audit controls — caregiver_id attribution on every dose log; created_at timestamps on all records; shift
+  lifecycle tracking (pending → confirmed → active → completed)
+  - Screenshot / screen capture protection — FLAG_SECURE blocks PHI from appearing in the recent-apps switcher
+  or screenshots (Android)
+
+  Privacy Rule alignment
+
+  - Minimum necessary — PHI stays on-device; no cloud sync or third-party analytics
+  - Individual access — The user owns and fully controls their data
+  - Workforce access limits — Caregiver shifts are time-bounded, entity-scoped, and require a confirmation
+  code; access expires automatically
+
+  ---
+  Not Covered
+
+  Transmission Security
+
+  - Caregiver SMS invites are unencrypted — The shift invite sent via SMS contains entity names, medication
+  names, and schedules. SMS is cleartext. This is the most significant gap.
+  - RxNorm API calls transmit medication names — Names are sent to rxnav.nlm.nih.gov to look up drug info. NIH
+  is not a business associate, there is no BAA, and medication names in context are PHI.
+  - No end-to-end encryption on DOSE_UPDATE messages — Dose sync messages between caregiver and primary devices
+   have no cryptographic integrity or confidentiality guarantees.
+
+  Audit Log Completeness
+
+  - Failed authentication attempts are not logged
+  - App opens, screen views, and data exports are not logged
+  - Settings changes (e.g., disabling FLAG_SECURE) are not audited
+  - There is no way to know whether a caregiver viewed data without logging a dose
+
+  Access Control Gaps
+
+  - No remote wipe — A lost or stolen device cannot be remotely locked or wiped
+  - No revocation of exported backups — Once a backup file is shared, access to it cannot be revoked
+  - No caregiver permission granularity — A caregiver with an active shift can see full medication history, not
+   just the current shift window
+  - Biometrics alone may be insufficient — HIPAA guidance increasingly favors MFA; biometrics without a PIN
+  fallback is a single factor
+
+  Data Lifecycle
+
+  - No data retention policy — HIPAA requires defined retention periods; the app keeps records indefinitely
+  - No secure deletion — Medications and entities are soft-deleted (deleted_at), not purged; a forensic
+  examination of the database file would recover them
+  - No data disposal procedure — There is no "factory reset" or "wipe all PHI" feature
+
+  Administrative Safeguards (§164.308) — entirely absent
+
+  - No written risk analysis or risk management plan
+  - No policies and procedures documentation
+  - No workforce training or sanctions policy for caregivers
+  - No contingency plan beyond the backup/restore feature
+  - No Business Associate Agreements with any third party
+
+  Organizational / Legal
+
+  - No Notice of Privacy Practices — Required if used by a covered entity
+  - No breach notification mechanism — If the device is compromised, there is no process to detect it, assess
+  impact, or notify affected individuals within the required 60-day window
+  - iOS screenshot protection missing — FLAG_SECURE is Android-only; the iOS equivalent (ignoresInvertColors,
+  isSecureTextEntry workarounds, or a UIKit-level solution) is not implemented
+
+  ---
+  Summary Assessment
+
+  The app has solid technical safeguard fundamentals — at-rest encryption, access control, and audit
+  attribution are well-handled for a device-local system. The critical unaddressed gap is transmission: the
+  caregiver invite flow sends PHI over SMS, which is incompatible with HIPAA's transmission security
+  requirement. Everything in the administrative safeguards category is out of scope for a code-level fix —
+  those require organizational processes, not features.
+ 
 
 
 

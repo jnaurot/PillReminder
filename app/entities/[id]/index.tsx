@@ -301,10 +301,10 @@ export default function EntityDetailScreen() {
       {/* Banners */}
       <TouchableOpacity
         style={styles.scheduleBanner}
-        onPress={() => router.push(`/entities/${id}/schedule`)}
+        onPress={() => router.push(`/entities/${id}/history`)}
         activeOpacity={0.8}
       >
-        <Text style={styles.scheduleBannerText}>📋  Schedule</Text>
+        <Text style={styles.scheduleBannerText}>📋  History</Text>
         <Text style={styles.scheduleBannerChevron}>›</Text>
       </TouchableOpacity>
       <TouchableOpacity
@@ -427,7 +427,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   scheduleBannerText: { fontSize: 15, fontWeight: '600', color: '#FFFFFF' },
-  complianceBannerText: { fontSize: 14, fontWeight: '500', color: '#CBD5E1' },
+  complianceBannerText: { fontSize: 15, fontWeight: '600', color: '#FFFFFF' },
   scheduleBannerChevron: { fontSize: 22, color: '#4A90D9' },
   header: {
     flexDirection: 'row',

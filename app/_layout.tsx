@@ -21,7 +21,7 @@ async function schedulePathForNotif(data: Record<string, unknown>): Promise<stri
       [medId],
     );
     if (!row) return null;
-    return `/entities/${row.entity_id}/schedule`;
+    return `/entities/${row.entity_id}/history`;
   } catch {
     return null;
   }
@@ -211,7 +211,7 @@ export default function RootLayout() {
         <Stack.Screen name="entities/new" />
         <Stack.Screen name="entities/[id]/index" />
         <Stack.Screen name="entities/[id]/edit" />
-        <Stack.Screen name="entities/[id]/schedule" />
+        <Stack.Screen name="entities/[id]/history" />
         <Stack.Screen name="entities/[id]/medications/new" />
         <Stack.Screen name="entities/[id]/medications/[medId]/index" />
         <Stack.Screen name="entities/[id]/medications/[medId]/edit" />
