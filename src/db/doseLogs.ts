@@ -5,6 +5,7 @@ import { getSettings } from './settings';
 import { getActiveShift } from './caregivers';
 import { parseSchedule } from '../types';
 import type { DoseLog, Medication, MedicationSchedule } from '../types';
+import { sortDosesByScheduledPosition } from '../utils/scheduleDates';
 export { todayStr } from '../utils/dateTime';
 
 const uuidv4 = () => Crypto.randomUUID();
@@ -182,17 +183,7 @@ export async function getDosesForDate(
     }
   }
 
-  // Sort: locked/upcoming by time, due/missed first, settled last
-  const statusOrder: Record<DoseStatus, number> = {
-    missed: 0, due: 1, locked: 2, upcoming: 3, taken: 4, skipped: 5,
-  };
-  doses.sort((a, b) => {
-    const so = statusOrder[a.status] - statusOrder[b.status];
-    if (so !== 0) return so;
-    return (a.scheduledAt ?? '').localeCompare(b.scheduledAt ?? '');
-  });
-
-  return doses;
+  return sortDosesByScheduledPosition(doses);
 }
 
 // ─── Find missed doses for a medication today ─────────────────────────────────

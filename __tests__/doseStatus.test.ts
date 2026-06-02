@@ -11,6 +11,11 @@
  *   diffMin > 60         → missed   (past missed window)
  */
 
+jest.mock('../src/db/database', () => ({ getDb: jest.fn() }));
+jest.mock('../src/db/medications', () => ({ getMedications: jest.fn() }));
+jest.mock('../src/db/settings', () => ({ getSettings: jest.fn() }));
+jest.mock('../src/db/caregivers', () => ({ getActiveShift: jest.fn() }));
+
 import { getDoseStatus } from '../src/db/doseLogs';
 import type { DoseLog } from '../src/types';
 
@@ -24,6 +29,7 @@ describe('getDoseStatus — log present', () => {
       skipped: 0,
       is_catchup: 0,
       notes: null,
+      caregiver_id: null,
       created_at: '2026-05-11T08:05:00',
     };
     expect(getDoseStatus('2026-05-11T08:00:00', log, 30, 60)).toBe('taken');
@@ -38,6 +44,7 @@ describe('getDoseStatus — log present', () => {
       skipped: 1,
       is_catchup: 0,
       notes: null,
+      caregiver_id: null,
       created_at: '2026-05-11T08:00:00',
     };
     expect(getDoseStatus('2026-05-11T08:00:00', log, 30, 60)).toBe('skipped');

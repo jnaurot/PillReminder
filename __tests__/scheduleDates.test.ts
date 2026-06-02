@@ -12,7 +12,9 @@ import {
   generateDateWindow,
   INITIAL_PAST_DAYS,
   INITIAL_FUTURE_DAYS,
+  sortDosesByScheduledPosition,
 } from '../src/utils/scheduleDates';
+import type { DoseStatus, ScheduledDose } from '../src/db/doseLogs';
 
 describe('dateStr', () => {
   it('formats a Date into YYYY-MM-DD', () => {
@@ -192,6 +194,37 @@ describe('formatSubtitle', () => {
 
 describe('buildSection', () => {
   const today = '2026-05-11';
+  const dose = (
+    key: string,
+    name: string,
+    scheduledAt: string | null,
+    status: DoseStatus,
+  ): ScheduledDose => ({
+    key,
+    medication: { name } as any,
+    scheduledAt,
+    timeLabel: scheduledAt?.slice(11, 16) ?? 'As needed',
+    log: status === 'taken'
+      ? {
+          id: `log-${key}`,
+          medication_id: key,
+          scheduled_at: scheduledAt ?? today,
+          taken_at: scheduledAt ?? today,
+          skipped: 0,
+          is_catchup: 0,
+          notes: null,
+          caregiver_id: null,
+          created_at: scheduledAt ?? today,
+        }
+      : null,
+    status,
+    effectiveEarlyWindow: 30,
+    effectiveMissedWindow: 60,
+    effectiveMissedPolicy: 'none',
+    shiftSource: 'local',
+    sharedShiftId: null,
+    entityPrimaryPhone: null,
+  });
 
   it('marks isToday=true only for today', () => {
     const section = buildSection(today, [], today);
@@ -255,5 +288,27 @@ describe('buildSection', () => {
     expect(section.data.length).toBe(2);
     expect((section.data[0] as any).isPlaceholder).toBeUndefined();
     expect((section.data[1] as any).isPlaceholder).toBeUndefined();
+  });
+
+  it('keeps a taken dose in its scheduled position on the Schedule page', () => {
+    const eightAmDue = dose('a', 'Morning Med', '2026-05-11T08:00:00', 'due');
+    const eightPmLocked = dose('b', 'Evening Med', '2026-05-11T20:00:00', 'locked');
+
+    const before = buildSection(today, [eightAmDue, eightPmLocked], today);
+    expect(before.data.map((item) => item.key)).toEqual(['a', 'b']);
+
+    const eightAmTaken = dose('a', 'Morning Med', '2026-05-11T08:00:00', 'taken');
+    const after = buildSection(today, [eightPmLocked, eightAmTaken], today);
+
+    expect(after.data.map((item) => item.key)).toEqual(['a', 'b']);
+    expect((after.data[0] as ScheduledDose).status).toBe('taken');
+  });
+
+  it('does not move atorvastatin below losartan after atorvastatin is taken', () => {
+    const atorvastatinTaken = dose('atorvastatin', 'Atorvastatin', '2026-05-11T08:00:00', 'taken');
+    const losartanDue = dose('losartan', 'Losartan', '2026-05-11T20:00:00', 'due');
+
+    expect(sortDosesByScheduledPosition([losartanDue, atorvastatinTaken]).map((item) => item.key))
+      .toEqual(['atorvastatin', 'losartan']);
   });
 });

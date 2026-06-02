@@ -312,7 +312,7 @@ export default function EntityDetailScreen() {
         onPress={() => router.push(`/entities/${id}/compliance`)}
         activeOpacity={0.8}
       >
-        <Text style={styles.complianceBannerText}>📊  Compliance Report</Text>
+        <Text style={styles.scheduleBannerText}>📊  Compliance Report</Text>
         <Text style={styles.scheduleBannerChevron}>›</Text>
       </TouchableOpacity>
 
@@ -422,12 +422,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#243B5E',
+    backgroundColor: '#1A2F5A',
     paddingHorizontal: 20,
     paddingVertical: 12,
   },
   scheduleBannerText: { fontSize: 15, fontWeight: '600', color: '#FFFFFF' },
-  complianceBannerText: { fontSize: 15, fontWeight: '600', color: '#FFFFFF' },
   scheduleBannerChevron: { fontSize: 22, color: '#4A90D9' },
   header: {
     flexDirection: 'row',

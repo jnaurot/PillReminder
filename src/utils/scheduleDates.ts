@@ -47,6 +47,17 @@ export const INITIAL_PAST_DAYS = 14;
 export const INITIAL_FUTURE_DAYS = 7;
 export const LOAD_MORE_BATCH = 14;
 
+// ─── Dose ordering ──────────────────────────────────────────────────────────
+
+export function sortDosesByScheduledPosition(doses: ScheduledDose[]): ScheduledDose[] {
+  return [...doses].sort((a, b) =>
+    (a.scheduledAt ?? '9999-12-31T23:59:59').localeCompare(
+      b.scheduledAt ?? '9999-12-31T23:59:59',
+    ) ||
+    a.medication.name.localeCompare(b.medication.name)
+  );
+}
+
 // ─── Section builder ─────────────────────────────────────────────────────────
 
 export function buildSection(
@@ -60,7 +71,7 @@ export function buildSection(
 
   const data: SectionItem[] =
     doses.length > 0
-      ? doses
+      ? sortDosesByScheduledPosition(doses)
       : [{ key: `empty-${dateStrVal}`, dateStr: dateStrVal, isPlaceholder: true }];
 
   return {
