@@ -3,6 +3,7 @@ import {
   View, Text, TouchableOpacity, StyleSheet, Alert, Modal,
   TextInput, KeyboardAvoidingView, Platform,
 } from 'react-native';
+import { router } from 'expo-router';
 import {
   getMissedDosesToday, logDoseTaken, logDoseSkipped,
   deleteLog, updateLogNote, todayStr,
@@ -423,6 +424,10 @@ export function DoseCard({
     );
   }
 
+  function openMedication() {
+    router.push(`/entities/${dose.medication.entity_id}/medications/${dose.medication.id}` as any);
+  }
+
   // ── Render ───────────────────────────────────────────────────────────────────
 
   return (
@@ -439,7 +444,11 @@ export function DoseCard({
         activeOpacity={settled ? 0.7 : 1}
       >
         <View style={card.topRow}>
-          <View style={{ flex: 1 }}>
+          <TouchableOpacity
+            style={card.infoBlock}
+            onPress={openMedication}
+            activeOpacity={0.75}
+          >
             <Text style={[card.medName, locked && card.textMuted]}>
               {dose.medication.name}
             </Text>
@@ -456,7 +465,7 @@ export function DoseCard({
                 {policy === 'catch_up' ? '⚡ Catch-up if missed' : '⛔ Must skip if missed'}
               </Text>
             )}
-          </View>
+          </TouchableOpacity>
           <View style={[card.badge, { backgroundColor: config.bg }]}>
             <Text style={[card.badgeText, { color: config.text }]}>{config.label}</Text>
           </View>
@@ -560,6 +569,7 @@ export const card = StyleSheet.create({
   containerDelegated: { opacity: 0.6, backgroundColor: '#F8FAFC' },
   delegatedLabel: { fontSize: 12, color: '#16A34A', fontWeight: '600', marginTop: 2 },
   topRow: { flexDirection: 'row', alignItems: 'flex-start' },
+  infoBlock: { flex: 1 },
   medName: { fontSize: 16, fontWeight: '700', color: '#1A2F5A' },
   dosage:  { fontSize: 13, color: '#64748B', marginTop: 2 },
   food:    { fontSize: 12, color: '#94A3B8', marginTop: 3 },
