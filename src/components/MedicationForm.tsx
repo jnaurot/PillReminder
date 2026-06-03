@@ -7,10 +7,12 @@ import { MedicationNameInput } from './MedicationNameInput';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getMedications } from '../db/medications';
+import DateInput from './DateInput';
 import type {
   MedicationSchedule, ScheduleType, FoodRequirement,
   MedicationInteraction, MissedPolicy, Medication,
 } from '../types';
+import { todayStr } from '../utils/dateTime';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -22,6 +24,7 @@ const PRESET_COLORS = [
 const PRESET_TIMES = ['06:00', '08:00', '12:00', '14:00', '18:00', '20:00', '22:00'];
 
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const SUPPLY_UNITS = ['pills', 'capsules', 'tablets', 'mL', 'mg', 'patches', 'injections', 'puffs', 'drops'];
 
 const SCHEDULE_TYPES: { key: ScheduleType; label: string }[] = [
   { key: 'fixed_times', label: 'Daily' },
@@ -465,6 +468,9 @@ export interface MedicationFormData {
   missed_window_minutes: number | null;
   color: string;
   notes: string | null;
+  starting_supply_quantity: number | null;
+  starting_supply_unit: string;
+  starting_supply_date: string | null;
 }
 
 interface Props {
@@ -481,6 +487,9 @@ interface Props {
   initialMissedWindowMinutes?: number | null;
   initialColor?: string;
   initialNotes?: string;
+  initialStartingSupplyQuantity?: string;
+  initialStartingSupplyUnit?: string;
+  initialStartingSupplyDate?: string;
   currentMedicationId?: string;
   saving: boolean;
   onSave: (data: MedicationFormData) => void;
@@ -500,6 +509,9 @@ export default function MedicationForm({
   initialMissedWindowMinutes = null,
   initialColor = '#4A90D9',
   initialNotes = '',
+  initialStartingSupplyQuantity = '',
+  initialStartingSupplyUnit = 'pills',
+  initialStartingSupplyDate = todayStr(),
   currentMedicationId,
   saving,
   onSave,
@@ -534,8 +546,12 @@ export default function MedicationForm({
   );
   const [color, setColor] = useState(initialColor);
   const [notes, setNotes] = useState(initialNotes);
+  const [startingSupplyQuantity, setStartingSupplyQuantity] = useState(initialStartingSupplyQuantity);
+  const [startingSupplyUnit, setStartingSupplyUnit] = useState(initialStartingSupplyUnit);
+  const [startingSupplyDate, setStartingSupplyDate] = useState(initialStartingSupplyDate);
   const [siblings, setSiblings] = useState<Medication[]>([]);
   const [showInteractionModal, setShowInteractionModal] = useState(false);
+  const showStartingSupply = !currentMedicationId;
 
   useEffect(() => {
     getMedications(entityId).then((meds) =>
@@ -583,6 +599,20 @@ export default function MedicationForm({
     const missedWindow = missedWindowOverride.trim()
       ? parseInt(missedWindowOverride, 10)
       : null;
+    const startingSupply = startingSupplyQuantity.trim()
+      ? parseInt(startingSupplyQuantity, 10)
+      : null;
+
+    if (startingSupplyQuantity.trim()) {
+      if (isNaN(startingSupply!) || startingSupply! < 1) {
+        Alert.alert('Starting supply must be a positive number');
+        return;
+      }
+      if (!startingSupplyDate || !/^\d{4}-\d{2}-\d{2}$/.test(startingSupplyDate)) {
+        Alert.alert('Enter a valid starting supply date.');
+        return;
+      }
+    }
 
     onSave({
       name: name.trim(),
@@ -596,6 +626,9 @@ export default function MedicationForm({
       missed_window_minutes: isNaN(missedWindow!) ? null : missedWindow,
       color,
       notes: notes.trim() || null,
+      starting_supply_quantity: startingSupply && !isNaN(startingSupply) ? startingSupply : null,
+      starting_supply_unit: startingSupplyUnit,
+      starting_supply_date: startingSupply && !isNaN(startingSupply) ? startingSupplyDate : null,
     });
   }
 
@@ -840,6 +873,45 @@ export default function MedicationForm({
               textAlignVertical="top"
             />
           </View>
+
+          {showStartingSupply && (
+            <View style={s.field}>
+              <Text style={s.label}>Starting Supply</Text>
+              <Text style={s.hint}>Optional. Leave blank to keep refill tracking in an unknown state until you log supply later.</Text>
+              <View style={s.row}>
+                <TextInput
+                  style={[s.input, { flex: 1 }]}
+                  value={startingSupplyQuantity}
+                  onChangeText={setStartingSupplyQuantity}
+                  placeholder="e.g. 30"
+                  placeholderTextColor="#94A3B8"
+                  keyboardType="numeric"
+                />
+                <View style={s.inlineUnitWrap}>
+                  <Text style={s.subLabel}>Unit</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                    <View style={s.unitChipRow}>
+                      {SUPPLY_UNITS.map((unit) => (
+                        <TouchableOpacity
+                          key={unit}
+                          style={[s.unitChip, startingSupplyUnit === unit && s.unitChipActive]}
+                          onPress={() => setStartingSupplyUnit(unit)}
+                        >
+                          <Text style={[s.unitChipText, startingSupplyUnit === unit && s.unitChipTextActive]}>
+                            {unit}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </ScrollView>
+                </View>
+              </View>
+              <View style={s.gap8}>
+                <Text style={s.subLabel}>Start Date</Text>
+                <DateInput value={startingSupplyDate} onChange={setStartingSupplyDate} style={s.input} />
+              </View>
+            </View>
+          )}
         </ScrollView>
       </KeyboardAvoidingView>
 
@@ -977,4 +1049,17 @@ const s = StyleSheet.create({
     paddingHorizontal: 14, justifyContent: 'center', marginLeft: 8,
   },
   windowUnitText: { fontSize: 14, color: '#64748B', fontWeight: '600' },
+  inlineUnitWrap: { flex: 1, marginLeft: 8, gap: 4 },
+  unitChipRow: { flexDirection: 'row', gap: 8 },
+  unitChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    backgroundColor: '#FFFFFF',
+  },
+  unitChipActive: { backgroundColor: '#4A90D9', borderColor: '#4A90D9' },
+  unitChipText: { fontSize: 13, color: '#64748B', fontWeight: '500' },
+  unitChipTextActive: { color: '#FFFFFF' },
 });

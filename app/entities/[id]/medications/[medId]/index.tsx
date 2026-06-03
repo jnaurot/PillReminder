@@ -6,6 +6,8 @@ import {
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getMedication, updateMedicationRxInfo, deleteMedication, eraseAndDeleteMedication } from '../../../../../src/db/medications';
+import { getLatestPrescription, getRefillStatus, type Prescription, type RefillStatus } from '../../../../../src/db/prescriptions';
+import { getSettings } from '../../../../../src/db/settings';
 import { cancelForMedication } from '../../../../../src/notifications/scheduler';
 import { fetchPillImages } from '../../../../../src/services/rxnorm';
 import type { DrugInfo, Medication, PillAppearance, PillImage } from '../../../../../src/types';
@@ -122,6 +124,8 @@ const pm = StyleSheet.create({
 export default function MedicationDetailScreen() {
   const { id, medId } = useLocalSearchParams<{ id: string; medId: string }>();
   const [med, setMed] = useState<Medication | null>(null);
+  const [latestPrescription, setLatestPrescription] = useState<Prescription | null>(null);
+  const [refillStatus, setRefillStatus] = useState<RefillStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [showPicker, setShowPicker] = useState(false);
   const [pickerImages, setPickerImages] = useState<PillImage[]>([]);
@@ -129,7 +133,13 @@ export default function MedicationDetailScreen() {
 
   const load = useCallback(async () => {
     const m = await getMedication(medId);
+    const [settings, latestRx] = await Promise.all([
+      getSettings(),
+      getLatestPrescription(medId),
+    ]);
     setMed(m);
+    setLatestPrescription(latestRx);
+    setRefillStatus(latestRx ? await getRefillStatus(medId, settings.refill_alert_days) : null);
     setLoading(false);
   }, [medId]);
 
@@ -229,6 +239,16 @@ export default function MedicationDetailScreen() {
 
   const drugInfo = parseDrugInfo(med.drug_info);
   const appearance = parsePillAppearance(med.pill_appearance);
+  const stockLabel = refillStatus
+    ? refillStatus.daysRemaining !== null
+      ? (refillStatus.daysRemaining <= 0 ? 'Refill needed now' : `${refillStatus.daysRemaining} day${refillStatus.daysRemaining === 1 ? '' : 's'} remaining`)
+      : (refillStatus.unitsRemaining !== null
+        ? `${Math.max(0, refillStatus.unitsRemaining)} ${refillStatus.prescription.unit} estimated remaining`
+        : 'Supply available')
+    : 'Unknown supply';
+  const stockSub = latestPrescription
+    ? `Based on ${latestPrescription.quantity} ${latestPrescription.unit} logged on ${latestPrescription.refill_date}`
+    : 'No starting supply or refill has been logged yet.';
 
   return (
     <SafeAreaView style={s.container} edges={['top', 'bottom']}>
@@ -297,6 +317,41 @@ export default function MedicationDetailScreen() {
             <Text style={s.actionIcon}>📊</Text>
             <Text style={s.actionLabel}>Compliance</Text>
           </TouchableOpacity>
+        </View>
+
+        <View style={s.section}>
+          <Text style={s.sectionTitle}>Supply Tracking</Text>
+          <View style={s.stockCard}>
+            <View style={s.stockHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={s.stockTitle}>{stockLabel}</Text>
+                <Text style={s.stockSub}>{stockSub}</Text>
+              </View>
+              {refillStatus?.isLow ? (
+                <View style={s.stockWarningPill}>
+                  <Text style={s.stockWarningText}>Low</Text>
+                </View>
+              ) : null}
+            </View>
+            <View style={s.stockActions}>
+              <TouchableOpacity
+                style={[s.stockBtn, med.deleted_at ? s.actionBtnDisabled : null]}
+                onPress={!med.deleted_at ? () => router.push(`/entities/${id}/medications/${medId}/refill`) : undefined}
+                disabled={!!med.deleted_at}
+              >
+                <Text style={s.stockBtnText}>{latestPrescription ? 'Adjust Supply' : 'Add Starting Supply'}</Text>
+              </TouchableOpacity>
+              {latestPrescription ? (
+                <TouchableOpacity
+                  style={[s.stockBtn, s.stockBtnSecondary, med.deleted_at ? s.actionBtnDisabled : null]}
+                  onPress={!med.deleted_at ? () => router.push(`/entities/${id}/medications/${medId}/refill`) : undefined}
+                  disabled={!!med.deleted_at}
+                >
+                  <Text style={[s.stockBtnText, s.stockBtnSecondaryText]}>Log Refill</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          </View>
         </View>
 
         {/* Pill appearance */}
@@ -425,6 +480,40 @@ const s = StyleSheet.create({
 
   section: { gap: 10 },
   sectionTitle: { fontSize: 13, fontWeight: '700', color: '#475569', textTransform: 'uppercase', letterSpacing: 0.5 },
+  stockCard: {
+    backgroundColor: '#FFF',
+    borderRadius: 14,
+    padding: 16,
+    gap: 14,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  stockHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  stockTitle: { fontSize: 17, fontWeight: '700', color: '#1A2F5A' },
+  stockSub: { fontSize: 13, color: '#64748B', marginTop: 4, lineHeight: 18 },
+  stockWarningPill: {
+    backgroundColor: '#FEF2F2',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  stockWarningText: { color: '#DC2626', fontSize: 12, fontWeight: '700' },
+  stockActions: { flexDirection: 'row', gap: 10, flexWrap: 'wrap' },
+  stockBtn: {
+    backgroundColor: '#4A90D9',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  stockBtnSecondary: {
+    backgroundColor: '#EEF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+  },
+  stockBtnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 14 },
+  stockBtnSecondaryText: { color: '#2563EB' },
 
   pillImageCard: {
     backgroundColor: '#FFF', borderRadius: 14, padding: 16, alignItems: 'center', gap: 10,

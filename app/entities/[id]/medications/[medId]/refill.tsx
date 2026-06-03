@@ -78,6 +78,7 @@ export default function RefillScreen() {
 
   const suggestedDays = medication ? computeSuggestedDays(medication, quantity) : null;
   const showResetToAuto = daysSupplyLocked && suggestedDays !== null;
+  const isInitialSupply = history.length === 0;
 
   async function handleSave() {
     Keyboard.dismiss();
@@ -217,10 +218,10 @@ export default function RefillScreen() {
       >
         <View style={styles.header}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-            <Text style={styles.backText}> ‹ Back</Text>
+          <Text style={styles.backText}> ‹ Back</Text>
           </TouchableOpacity>
           <Text style={styles.title} numberOfLines={1}>
-            Refill — {medication?.name ?? ''}
+            {isInitialSupply ? 'Supply' : 'Refill'} — {medication?.name ?? ''}
           </Text>
           <TouchableOpacity onPress={handleSave} disabled={saving}>
             <Text style={[styles.saveText, saving && styles.saveDisabled]}>Save</Text>
@@ -232,6 +233,14 @@ export default function RefillScreen() {
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
         >
+          <View style={styles.introCard}>
+            <Text style={styles.introTitle}>{isInitialSupply ? 'Starting Supply' : 'Log Supply Change'}</Text>
+            <Text style={styles.introText}>
+              {isInitialSupply
+                ? 'Record how much medication is currently on hand. Refill tracking stays unknown until supply is entered.'
+                : 'Add the latest amount received. The app uses this supply history to estimate what remains.'}
+            </Text>
+          </View>
           <View style={styles.field}>
             <Text style={styles.label}>Refill Date</Text>
             <DateInput value={refillDate} onChange={setRefillDate} style={styles.input} />
@@ -339,6 +348,16 @@ export default function RefillScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F0F4FA' },
+  introCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    gap: 6,
+  },
+  introTitle: { fontSize: 15, fontWeight: '700', color: '#1A2F5A' },
+  introText: { fontSize: 13, color: '#64748B', lineHeight: 19 },
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 16, paddingVertical: 14,

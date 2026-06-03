@@ -21,7 +21,13 @@ export default function EditMedicationScreen() {
   async function handleSave(data: MedicationFormData) {
     setSaving(true);
     try {
-      await updateMedication(medId, data);
+      const {
+        starting_supply_quantity: _startingSupplyQuantity,
+        starting_supply_unit: _startingSupplyUnit,
+        starting_supply_date: _startingSupplyDate,
+        ...medicationData
+      } = data;
+      await updateMedication(medId, medicationData);
       const updated = await getMedication(medId);
       if (updated) {
         const settings = await getSettings();
