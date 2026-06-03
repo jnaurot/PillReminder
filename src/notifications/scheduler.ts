@@ -5,7 +5,7 @@ import { getSettings } from '../db/settings';
 import { parseSchedule } from '../types';
 import type { Medication } from '../types';
 import { dateToStr } from '../utils/dateTime';
-import { scheduleAlarmNative, cancelAlarmNative } from '../native/alarmScheduler';
+import { scheduleAlarmNative, cancelAlarmNative, dismissActiveAlarmNative } from '../native/alarmScheduler';
 
 const isExpoGo = Constants.executionEnvironment === 'storeClient';
 
@@ -71,7 +71,9 @@ export async function cancelMissedAlert(medId: string, scheduledAtStr: string): 
   try {
     const [dateStr, timePart] = scheduledAtStr.split('T');
     const timeHHmm = timePart?.slice(0, 5) ?? '';
-    await N.cancelScheduledNotificationAsync(missId(medId, dateStr, timeHHmm));
+    const id = missId(medId, dateStr, timeHHmm);
+    await N.cancelScheduledNotificationAsync(id);
+    await N.dismissNotificationAsync(id).catch(() => {});
   } catch {}
 }
 
@@ -83,6 +85,7 @@ export async function cancelAlarmAlert(medId: string, scheduledAtStr: string): P
     const timeHHmm = timePart?.slice(0, 5) ?? '';
     const id = alarmId(medId, dateStr, timeHHmm);
     cancelAlarmNative(id);
+    dismissActiveAlarmNative();
     if (Platform.OS === 'android') {
       try {
         const db = getDb();

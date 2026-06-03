@@ -31,3 +31,8 @@ export function cancelAlarmNative(id: string): void {
   ensureModule();
   AlarmScheduler.cancelAlarm(hashId(id));
 }
+
+export function dismissActiveAlarmNative(): void {
+  ensureModule();
+  AlarmScheduler.dismissActiveAlarm();
+}
