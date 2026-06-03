@@ -42,10 +42,10 @@ async function initNotifications() {
     }),
   });
 
-  // Foreground: vibrate directly when an alarm/test notification arrives.
+  // Foreground: vibrate directly when an alarm notification arrives.
   addNotificationReceivedListener((notification) => {
     const type = (notification.request.content.data as any)?.type;
-    if (type === 'alarm' || type === 'test') {
+    if (type === 'alarm') {
       Vibration.vibrate([0, 5000]);
     }
   });

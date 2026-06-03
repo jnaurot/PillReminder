@@ -356,48 +356,6 @@ export async function scheduleForMedication(
   } catch {}
 }
 
-// ─── Test alarm — fires in 5 seconds ─────────────────────────────────────────
-
-export async function scheduleTestAlarm(): Promise<void> {
-  if (Platform.OS === 'android') {
-    const fireMs = Date.now() + 5000;
-    console.log('[PillReminder] scheduleTestAlarm: cancelAlarmNative');
-    cancelAlarmNative('test-alarm');
-    console.log(`[PillReminder] scheduleTestAlarm: scheduleAlarmNative fireMs=${fireMs}`);
-    scheduleAlarmNative(
-      'test-alarm',
-      'Test alarm',
-      'Full-screen intent and vibration are working.',
-      fireMs,
-      'dose-alarm-v3',
-    );
-    console.log('[PillReminder] scheduleTestAlarm: done');
-    return;
-  }
-  const N = await getN();
-  if (!N) return;
-  try {
-    await N.cancelScheduledNotificationAsync('test-alarm');
-  } catch {}
-  try {
-    await N.scheduleNotificationAsync({
-      identifier: 'test-alarm',
-      content: {
-        title: 'Test alarm',
-        body: 'Alarm channel and vibration are working.',
-        priority: 'max',
-        sticky: false,
-        channelId: 'dose-alarm-v3',
-        data: { type: 'test' },
-      },
-      trigger: {
-        type: N.SchedulableTriggerInputTypes.TIME_INTERVAL,
-        seconds: 5,
-      },
-    });
-  } catch {}
-}
-
 // ─── Update app icon badge ────────────────────────────────────────────────────
 // Pass the count of actionable (due + missed) doses computed by the caller,
 // since computing status accurately requires schedule introspection.
