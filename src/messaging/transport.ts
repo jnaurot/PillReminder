@@ -1,11 +1,10 @@
 import * as SMS from 'expo-sms';
-import type { AnyMessage } from './types';
-import { buildDeepLink } from './codec';
+import { buildDeepLink, type TransportPayload } from './codec';
 
 export interface SendOptions {
   phone: string;
   humanText: string; // plain-text fallback for recipients without PillReminder
-  msg: AnyMessage;
+  msg: TransportPayload;
 }
 
 // Swap this interface for a different backend (push, websocket, etc.) without

@@ -1,3 +1,4 @@
+import * as Crypto from 'expo-crypto';
 import { useEffect, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet,
@@ -5,12 +6,23 @@ import {
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { decodeMessage } from '../../src/messaging/codec';
+import { decodeMessage, isProtocolEnvelope, type TransportPayload } from '../../src/messaging/codec';
 import { handleMessage } from '../../src/messaging/handlers';
 import { defaultTransport } from '../../src/messaging/transport';
-import { MSG_VERSION } from '../../src/messaging/types';
-import type { AnyMessage, MsgShiftInvite, MsgShiftHandback } from '../../src/messaging/types';
+import type { MsgShiftInvite, MsgShiftHandback } from '../../src/messaging/types';
 import { getDb } from '../../src/db/database';
+import type { ProtocolEnvelope, ShiftInvitePayload } from '../../src/messaging/protocol';
+import {
+  buildShiftDelegatedSnapshot,
+  createShiftAcceptEnvelope,
+  createShiftActivateEnvelope,
+  createShiftCompleteAckEnvelope,
+  createShiftRejectEnvelope,
+  createShiftReturnAckEnvelope,
+  processProtocolEnvelope,
+  readPlaintextProtocolPayload,
+} from '../../src/messaging/secureProtocol';
+import { getShiftById } from '../../src/db/caregivers';
 
 function fmtDT(iso: string) {
   return new Date(iso).toLocaleString([], {
@@ -26,13 +38,20 @@ const RESULT_LABELS: Record<string, string> = {
   refill_updated:          'Refill recorded.',
   shift_handback_received: 'Shift ended — responsibility returned to you.',
   shift_completed:         'Shift data cleared from this device.',
+  shift_accept_received: 'Caregiver accepted — activation sent.',
+  shift_activated: 'Shift is active on this device.',
+  shift_return_requested: 'Returned dosing data received.',
+  shift_return_acked_cleanup_done: 'Primary caregiver confirmed import. Shared data was removed from this device.',
+  shift_invite_received: 'Invite received.',
+  shift_cancelled: 'Shift cancelled.',
+  shift_rejected: 'Caregiver declined the shift.',
 };
 
 type ScreenState = 'loading' | 'invite' | 'processing' | 'done' | 'error';
 
 export default function IncomingScreen() {
   const { d } = useLocalSearchParams<{ d: string }>();
-  const [msg, setMsg] = useState<AnyMessage | null>(null);
+  const [msg, setMsg] = useState<TransportPayload | null>(null);
   const [state, setState] = useState<ScreenState>('loading');
   const [resultText, setResultText] = useState('');
   const [acting, setActing] = useState(false);
@@ -42,15 +61,96 @@ export default function IncomingScreen() {
     const decoded = decodeMessage(d);
     if (!decoded) { finish(false, 'Could not decode message — it may be corrupted.'); return; }
     setMsg(decoded);
-    if (decoded.type === 'SHIFT_INVITE') {
+    if ((isProtocolEnvelope(decoded) && decoded.message_type === 'SHIFT_INVITE')
+      || (!isProtocolEnvelope(decoded) && decoded.type === 'SHIFT_INVITE')) {
       setState('invite');
     } else {
       processMsg(decoded);
     }
   }, [d]);
 
-  async function processMsg(m: AnyMessage) {
+  async function sendActivationAsPrimary(envelope: ProtocolEnvelope) {
+    const shift = await getShiftById(envelope.shift_id);
+    if (!shift?.transfer_id) throw new Error('Shift not found for activation.');
+    const snapshot = await buildShiftDelegatedSnapshot(shift.id);
+    const activation = await createShiftActivateEnvelope({
+      shiftId: shift.id,
+      transferId: shift.transfer_id,
+      sessionId: Crypto.randomUUID(),
+      shiftVersion: shift.shift_version,
+      patients: snapshot.patients,
+      medications: snapshot.medications,
+      expiresAt: shift.end_time,
+    });
+    await defaultTransport.send({
+      phone: shift.caregiver.phone,
+      humanText: `Caregiver shift is active for ${fmtDT(shift.start_time)} to ${fmtDT(shift.end_time)}.`,
+      msg: activation,
+    });
+  }
+
+  async function sendReturnAckAsPrimary(envelope: ProtocolEnvelope) {
+    const shift = await getShiftById(envelope.shift_id);
+    if (!shift?.transfer_id || !shift.session_id) throw new Error('Shift not ready for return acknowledgement.');
+    const returnAck = await createShiftReturnAckEnvelope({
+      shiftId: shift.id,
+      transferId: shift.transfer_id,
+      sessionId: shift.session_id,
+      finalSeq: shift.final_seq ?? shift.last_applied_seq,
+      expiresAt: shift.end_time,
+    });
+    await defaultTransport.send({
+      phone: shift.caregiver.phone,
+      humanText: 'Returned dosing data was imported successfully. Shared records can now be removed from your device.',
+      msg: returnAck,
+    });
+  }
+
+  async function sendCompleteAckAsAlternate(envelope: ProtocolEnvelope) {
+    const shift = await getShiftById(envelope.shift_id);
+    if (!shift?.transfer_id || !shift.session_id || !shift.primary_phone) {
+      throw new Error('Shift is missing cleanup acknowledgement details.');
+    }
+    const completeAck = await createShiftCompleteAckEnvelope({
+      shiftId: shift.id,
+      transferId: shift.transfer_id,
+      sessionId: shift.session_id,
+      expiresAt: shift.end_time,
+    });
+    await defaultTransport.send({
+      phone: shift.primary_phone,
+      humanText: 'Shared caregiver records have been removed from this device.',
+      msg: completeAck,
+    });
+  }
+
+  async function processSecureMsg(m: ProtocolEnvelope) {
+    const result = await processProtocolEnvelope(m);
+    if (!result.ok) {
+      finish(false, result.error);
+      return;
+    }
+    try {
+      if (m.message_type === 'SHIFT_ACCEPT') {
+        await sendActivationAsPrimary(m);
+      } else if (m.message_type === 'SHIFT_RETURN_REQUEST') {
+        await sendReturnAckAsPrimary(m);
+      } else if (m.message_type === 'SHIFT_RETURN_ACK') {
+        await sendCompleteAckAsAlternate(m);
+      }
+    } catch (e: any) {
+      finish(false, e?.message ?? 'Secure follow-up failed.');
+      return;
+    }
+    finish(true, RESULT_LABELS[result.action] ?? 'Done.');
+  }
+
+  async function processMsg(m: TransportPayload) {
     setState('processing');
+    if (isProtocolEnvelope(m)) {
+      await processSecureMsg(m);
+      return;
+    }
     const result = await handleMessage(m);
     if (!result.ok) {
       finish(false, (result as any).error);
@@ -101,7 +201,7 @@ export default function IncomingScreen() {
               await defaultTransport.send({
                 phone: caregiverPhone,
                 humanText: 'Your caregiver shift has been acknowledged. Thank you!',
-                msg: { v: MSG_VERSION, type: 'SHIFT_COMPLETE', shiftId: m.shiftId },
+                msg: { v: 1, type: 'SHIFT_COMPLETE', shiftId: m.shiftId },
               });
             } catch (e: any) {
               Alert.alert('SMS error', e?.message ?? 'Could not send.');
@@ -119,8 +219,35 @@ export default function IncomingScreen() {
   }
 
   async function handleAccept() {
-    if (!msg || msg.type !== 'SHIFT_INVITE') return;
+    if (!msg) return;
     setActing(true);
+
+    if (isProtocolEnvelope(msg)) {
+      const invite = readPlaintextProtocolPayload<ShiftInvitePayload>(msg);
+      const result = await processProtocolEnvelope(msg);
+      if (!result.ok) {
+        Alert.alert('Error', result.error);
+        setActing(false);
+        return;
+      }
+      try {
+        const accept = await createShiftAcceptEnvelope(msg);
+        await defaultTransport.send({
+          phone: invite.primary_phone,
+          humanText: `Caregiver accepted. Shift starts ${fmtDT(invite.start_time)}.`,
+          msg: accept,
+        });
+      } catch (e: any) {
+        Alert.alert(
+          'SMS error',
+          `Could not send acceptance SMS: ${e?.message ?? 'unknown'}. You may want to notify the primary caregiver manually.`,
+        );
+        setActing(false);
+        return;
+      }
+      router.replace('/today');
+      return;
+    }
 
     const result = await handleMessage(msg);
     if (!result.ok) {
@@ -129,15 +256,16 @@ export default function IncomingScreen() {
       return;
     }
 
+    const inviteMsg = msg as MsgShiftInvite;
     try {
       await defaultTransport.send({
-        phone: msg.primaryPhone,
-        humanText: `Caregiver accepted. Shift starts ${fmtDT(msg.startTime)}.`,
+        phone: inviteMsg.primaryPhone,
+        humanText: `Caregiver accepted. Shift starts ${fmtDT(inviteMsg.startTime)}.`,
         msg: {
-          v: MSG_VERSION,
+          v: 1,
           type: 'SHIFT_ACCEPT',
-          shiftId: msg.shiftId,
-          confirmationCode: msg.confirmationCode,
+          shiftId: inviteMsg.shiftId,
+          confirmationCode: inviteMsg.confirmationCode,
         },
       });
     } catch (e: any) {
@@ -152,13 +280,27 @@ export default function IncomingScreen() {
   }
 
   async function handleDecline() {
-    if (!msg || msg.type !== 'SHIFT_INVITE') return;
+    if (!msg) return;
     setActing(true);
+    if (isProtocolEnvelope(msg)) {
+      const invite = readPlaintextProtocolPayload<ShiftInvitePayload>(msg);
+      try {
+        const reject = await createShiftRejectEnvelope(msg, null);
+        await defaultTransport.send({
+          phone: invite.primary_phone,
+          humanText: 'Caregiver declined the shift.',
+          msg: reject,
+        });
+      } catch { /* non-fatal */ }
+      router.replace('/today');
+      return;
+    }
+    const inviteMsg = msg as MsgShiftInvite;
     try {
       await defaultTransport.send({
-        phone: msg.primaryPhone,
+        phone: inviteMsg.primaryPhone,
         humanText: 'Caregiver declined the shift.',
-        msg: { v: MSG_VERSION, type: 'SHIFT_DECLINE', shiftId: msg.shiftId, reason: null },
+        msg: { v: 1, type: 'SHIFT_DECLINE', shiftId: inviteMsg.shiftId, reason: null },
       });
     } catch { /* non-fatal */ }
     router.replace('/today');
@@ -207,6 +349,8 @@ export default function IncomingScreen() {
 
   // ── SHIFT_INVITE ─────────────────────────────────────────────────────────
 
+  const isSecureInvite = !!msg && isProtocolEnvelope(msg);
+  const secureInvite = isSecureInvite ? readPlaintextProtocolPayload<ShiftInvitePayload>(msg as ProtocolEnvelope) : null;
   const invite = msg as MsgShiftInvite;
   return (
     <SafeAreaView style={s.container} edges={['top', 'bottom']}>
@@ -218,34 +362,44 @@ export default function IncomingScreen() {
       <ScrollView contentContainerStyle={s.content}>
         <View style={s.card}>
           <Text style={s.cardLabel}>From</Text>
-          <Text style={s.cardValue}>{invite.primaryPhone}</Text>
+          <Text style={s.cardValue}>{isSecureInvite ? secureInvite?.primary_phone : invite.primaryPhone}</Text>
         </View>
 
         <View style={s.card}>
           <Text style={s.cardLabel}>Shift window</Text>
-          <Text style={s.cardValue}>{fmtDT(invite.startTime)}</Text>
-          <Text style={s.cardSub}>to {fmtDT(invite.endTime)}</Text>
+          <Text style={s.cardValue}>{fmtDT(isSecureInvite ? secureInvite!.start_time : invite.startTime)}</Text>
+          <Text style={s.cardSub}>to {fmtDT(isSecureInvite ? secureInvite!.end_time : invite.endTime)}</Text>
         </View>
 
         <View style={s.card}>
-          <Text style={s.cardLabel}>Patients ({invite.entities.length})</Text>
-          {invite.entities.map((e) => (
-            <Text key={e.id} style={s.cardValue}>{e.name}</Text>
-          ))}
-          <Text style={s.cardSub}>{invite.medications.length} medication(s) included</Text>
+          <Text style={s.cardLabel}>Patients</Text>
+          {isSecureInvite ? (
+            <>
+              <Text style={s.cardValue}>{secureInvite!.patient_count} patient(s)</Text>
+              <Text style={s.cardSub}>{secureInvite!.medication_count} medication(s) included</Text>
+            </>
+          ) : (
+            <>
+              {invite.entities.map((e) => (
+                <Text key={e.id} style={s.cardValue}>{e.name}</Text>
+              ))}
+              <Text style={s.cardSub}>{invite.medications.length} medication(s) included</Text>
+            </>
+          )}
         </View>
 
-        {invite.shiftNotes ? (
+        {(isSecureInvite ? secureInvite?.shift_note : invite.shiftNotes) ? (
           <View style={s.card}>
             <Text style={s.cardLabel}>Notes</Text>
-            <Text style={s.cardValue}>{invite.shiftNotes}</Text>
+            <Text style={s.cardValue}>{isSecureInvite ? secureInvite?.shift_note : invite.shiftNotes}</Text>
           </View>
         ) : null}
 
         <View style={s.infoBox}>
           <Text style={s.infoText}>
-            Accepting will import the patients and their medications into your PillReminder app
-            for the duration of this shift.
+            {isSecureInvite
+              ? 'Accepting will confirm the secure handoff. The active patient and medication records arrive in a follow-up activation message, and prior dose history is not imported.'
+              : 'Accepting will import the patients and their medications into your PillReminder app for the duration of this shift.'}
           </Text>
         </View>
 

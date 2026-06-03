@@ -312,23 +312,49 @@ export async function logDoseTaken(
   scheduledAtStr: string | null,
   catchUpScheduledAt?: string,
   note?: string,
-): Promise<void> {
+): Promise<DoseLog[]> {
   const recordedAt = now();
   const sat = scheduledAtStr ?? recordedAt;
   const caregiverId = await resolveLoggerId(medicationId);
-  await upsertLog(medicationId, sat, takenAtFor(sat, recordedAt), recordedAt, 0, 0, note ?? null, caregiverId);
+  const logs: DoseLog[] = [];
+  logs.push(
+    await upsertLog(
+      medicationId,
+      sat,
+      takenAtFor(sat, recordedAt),
+      recordedAt,
+      0,
+      0,
+      note ?? null,
+      caregiverId,
+    ),
+  );
   if (catchUpScheduledAt) {
-    await upsertLog(medicationId, catchUpScheduledAt, takenAtFor(catchUpScheduledAt, recordedAt), recordedAt, 0, 1, null, caregiverId);
+    logs.push(
+      await upsertLog(
+        medicationId,
+        catchUpScheduledAt,
+        takenAtFor(catchUpScheduledAt, recordedAt),
+        recordedAt,
+        0,
+        1,
+        null,
+        caregiverId,
+      ),
+    );
   }
+  return logs;
 }
 
 export async function logDoseSkipped(
   medicationId: string,
   scheduledAtStr: string,
-): Promise<void> {
+): Promise<DoseLog[]> {
   const recordedAt = now();
   const caregiverId = await resolveLoggerId(medicationId);
-  await upsertLog(medicationId, scheduledAtStr, scheduledAtStr, recordedAt, 1, 0, null, caregiverId);
+  return [
+    await upsertLog(medicationId, scheduledAtStr, scheduledAtStr, recordedAt, 1, 0, null, caregiverId),
+  ];
 }
 
 // ─── All entities' doses for a date ──────────────────────────────────────────

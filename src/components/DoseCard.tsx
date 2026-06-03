@@ -1,3 +1,4 @@
+import * as Crypto from 'expo-crypto';
 import { useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, Alert, Modal,
@@ -14,7 +15,12 @@ import { parseSchedule, parseInteractions } from '../types/index';
 import type { MedicationInteraction } from '../types/index';
 import { cancelMissedAlert, cancelAlarmAlert } from '../notifications/scheduler';
 import { defaultTransport } from '../messaging/transport';
-import { MSG_VERSION } from '../messaging/types';
+import {
+  annotateDoseLogProtocolEvent,
+  createDoseEventBatchEnvelope,
+  getNextProtocolEventSeq,
+  getShiftTransportContext,
+} from '../messaging/secureProtocol';
 
 export const STATUS_CONFIG: Record<DoseStatus, { label: string; bg: string; text: string }> = {
   locked:   { label: 'Scheduled', bg: '#F1F5F9', text: '#94A3B8' },
@@ -281,14 +287,20 @@ export function DoseCard({
   }
 
   async function executeTakePrn(note: string) {
-    await logDoseTaken(dose.medication.id, null, undefined, note || undefined);
-    await maybeSendDoseUpdate(new Date().toISOString(), false, note || null);
+    const logs = await logDoseTaken(dose.medication.id, null, undefined, note || undefined);
+    await maybeSendDoseEvents(logs.map((log) => ({
+      log,
+      eventType: 'dose_taken' as const,
+      note: note || null,
+    })));
   }
 
-  async function maybeSendDoseUpdate(
-    scheduledAt: string,
-    skipped: boolean,
-    note: string | null,
+  async function maybeSendDoseEvents(
+    entries: Array<{
+      log: DoseLog;
+      eventType: 'dose_taken' | 'dose_skipped' | 'dose_catchup';
+      note: string | null;
+    }>,
   ) {
     if (dose.shiftSource !== 'shared' || !dose.entityPrimaryPhone || !dose.sharedShiftId) {
       onAction();
@@ -296,28 +308,49 @@ export function DoseCard({
     }
     Alert.alert(
       'Notify primary caregiver?',
-      `Send a dose update for ${dose.medication.name} to the primary?`,
+      `Send ${entries.length > 1 ? 'dose updates' : 'a dose update'} for ${dose.medication.name} to the primary?`,
       [
         { text: 'Skip', style: 'cancel', onPress: onAction },
         {
           text: 'Send update',
           onPress: async () => {
             try {
+              const context = await getShiftTransportContext(dose.sharedShiftId!);
+              const startSeq = await getNextProtocolEventSeq(dose.sharedShiftId!);
+              const events = entries.map((entry, index) => ({
+                event_id: Crypto.randomUUID(),
+                seq: startSeq + index,
+                event_type: entry.eventType,
+                patient_id: dose.medication.entity_id,
+                medication_id: dose.medication.id,
+                scheduled_at: entry.log.scheduled_at,
+                recorded_at: entry.log.created_at,
+                taken_at: entry.log.taken_at,
+                skipped: entry.log.skipped === 1,
+                note: entry.note,
+              }));
+              const envelope = await createDoseEventBatchEnvelope({
+                shiftId: context.shiftId,
+                transferId: context.transferId,
+                sessionId: context.sessionId,
+                events,
+                expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+              });
               await defaultTransport.send({
                 phone: dose.entityPrimaryPhone!,
-                humanText: `Dose logged: ${dose.medication.name}${note ? ` — ${note}` : ''}.`,
-                msg: {
-                  v: MSG_VERSION,
-                  type: 'DOSE_UPDATE',
-                  shiftId: dose.sharedShiftId!,
-                  entityId: dose.medication.entity_id,
-                  medicationId: dose.medication.id,
-                  scheduledAt,
-                  takenAt: skipped ? null : new Date().toISOString(),
-                  skipped,
-                  notes: note,
-                },
+                humanText: `Dose logged: ${dose.medication.name}${entries.some((entry) => entry.note) ? ' with notes' : ''}.`,
+                msg: envelope,
               });
+              for (const event of events) {
+                await annotateDoseLogProtocolEvent({
+                  medicationId: event.medication_id,
+                  scheduledAt: event.scheduled_at,
+                  eventId: event.event_id,
+                  shiftId: context.shiftId,
+                  seq: event.seq,
+                  recordedAt: event.recorded_at,
+                });
+              }
             } catch (e: any) {
               Alert.alert('SMS error', e?.message ?? 'Could not send update.');
             }
@@ -335,12 +368,16 @@ export function DoseCard({
     );
 
     if (missed.length === 0 || policy === 'none') {
-      await logDoseTaken(dose.medication.id, dose.scheduledAt);
+      const logs = await logDoseTaken(dose.medication.id, dose.scheduledAt);
       if (dose.scheduledAt) {
         await cancelMissedAlert(dose.medication.id, dose.scheduledAt);
         await cancelAlarmAlert(dose.medication.id, dose.scheduledAt);
       }
-      await maybeSendDoseUpdate(dose.scheduledAt ?? new Date().toISOString(), false, null);
+      await maybeSendDoseEvents(logs.map((log) => ({
+        log,
+        eventType: 'dose_taken' as const,
+        note: null,
+      })));
       return;
     }
 
@@ -355,7 +392,7 @@ export function DoseCard({
           {
             text: 'Take both',
             onPress: async () => {
-              await logDoseTaken(
+              const logs = await logDoseTaken(
                 dose.medication.id, dose.scheduledAt,
                 missedDose.scheduledAt ?? undefined,
               );
@@ -367,7 +404,11 @@ export function DoseCard({
                 await cancelMissedAlert(dose.medication.id, missedDose.scheduledAt);
                 await cancelAlarmAlert(dose.medication.id, missedDose.scheduledAt);
               }
-              await maybeSendDoseUpdate(dose.scheduledAt ?? new Date().toISOString(), false, null);
+              await maybeSendDoseEvents(logs.map((log) => ({
+                log,
+                eventType: log.is_catchup ? 'dose_catchup' as const : 'dose_taken' as const,
+                note: log.notes ?? null,
+              })));
             },
           },
         ],
@@ -385,8 +426,8 @@ export function DoseCard({
             text: `Skip ${missedDose.timeLabel} dose`,
             style: 'destructive',
             onPress: async () => {
-              await logDoseSkipped(dose.medication.id, missedDose.scheduledAt!);
-              await logDoseTaken(dose.medication.id, dose.scheduledAt);
+              const skippedLogs = await logDoseSkipped(dose.medication.id, missedDose.scheduledAt!);
+              const takenLogs = await logDoseTaken(dose.medication.id, dose.scheduledAt);
               if (dose.scheduledAt) {
                 await cancelMissedAlert(dose.medication.id, dose.scheduledAt);
                 await cancelAlarmAlert(dose.medication.id, dose.scheduledAt);
@@ -395,7 +436,18 @@ export function DoseCard({
                 await cancelMissedAlert(dose.medication.id, missedDose.scheduledAt);
                 await cancelAlarmAlert(dose.medication.id, missedDose.scheduledAt);
               }
-              await maybeSendDoseUpdate(dose.scheduledAt ?? new Date().toISOString(), false, null);
+              await maybeSendDoseEvents([
+                ...skippedLogs.map((log) => ({
+                  log,
+                  eventType: 'dose_skipped' as const,
+                  note: null,
+                })),
+                ...takenLogs.map((log) => ({
+                  log,
+                  eventType: 'dose_taken' as const,
+                  note: null,
+                })),
+              ]);
             },
           },
         ],
@@ -414,10 +466,14 @@ export function DoseCard({
           text: 'Skip',
           style: 'destructive',
           onPress: async () => {
-            await logDoseSkipped(dose.medication.id, dose.scheduledAt!);
+            const logs = await logDoseSkipped(dose.medication.id, dose.scheduledAt!);
             await cancelMissedAlert(dose.medication.id, dose.scheduledAt!);
             await cancelAlarmAlert(dose.medication.id, dose.scheduledAt!);
-            await maybeSendDoseUpdate(dose.scheduledAt!, true, null);
+            await maybeSendDoseEvents(logs.map((log) => ({
+              log,
+              eventType: 'dose_skipped' as const,
+              note: null,
+            })));
           },
         },
       ],

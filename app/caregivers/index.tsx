@@ -1,3 +1,4 @@
+import * as Crypto from 'expo-crypto';
 import { useCallback, useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity,
@@ -7,12 +8,18 @@ import { router, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getEntities } from '../../src/db/entities';
 import {
-  getLiveShifts, getRecentShifts, confirmShift, cancelShift, completeShift,
-  buildInviteSMS, deleteSharedShiftData,
+  getLiveShifts, getRecentShifts, cancelShift,
+  buildInviteSMS,
   type ShiftWithCaregiver,
 } from '../../src/db/caregivers';
 import { defaultTransport } from '../../src/messaging/transport';
-import { MSG_VERSION } from '../../src/messaging/types';
+import {
+  createShiftCancelEnvelope,
+  createShiftInviteEnvelope,
+  createShiftReturnRequestEnvelope,
+  summarizeOutgoingShiftEvents,
+} from '../../src/messaging/secureProtocol';
+import { getMedications } from '../../src/db/medications';
 import type { Entity } from '../../src/types/index';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -42,7 +49,15 @@ const STATUS_STYLE: Record<string, { bg: string; text: string; label: string }> 
   active:    { bg: '#F0FDF4', text: '#16A34A', label: 'Active now' },
   completed: { bg: '#F1F5F9', text: '#64748B', label: 'Completed' },
   cancelled: { bg: '#FEF2F2', text: '#DC2626', label: 'Cancelled' },
+  return_sent: { bg: '#FEFCE8', text: '#A16207', label: 'Awaiting primary ack' },
+  return_pending_import: { bg: '#EFF6FF', text: '#1D4ED8', label: 'Importing return' },
+  awaiting_cleanup_ack: { bg: '#F1F5F9', text: '#64748B', label: 'Cleanup sent' },
+  rejected: { bg: '#FEF2F2', text: '#DC2626', label: 'Declined' },
 };
+
+function getShiftStatusPresentation(shift: ShiftWithCaregiver) {
+  return STATUS_STYLE[shift.protocol_state] ?? STATUS_STYLE[shift.resolvedStatus] ?? STATUS_STYLE.pending;
+}
 
 // ─── Shift card ───────────────────────────────────────────────────────────────
 
@@ -55,52 +70,39 @@ function ShiftCard({
   entities: Entity[];
   onRefresh: () => void;
 }) {
-  const st = STATUS_STYLE[shift.resolvedStatus] ?? STATUS_STYLE.pending;
+  const st = getShiftStatusPresentation(shift);
   const who = entityLabel(shift, entities);
 
-  // When primary_phone is set, this device IS the caregiver (shift was imported via invite).
-  const isCaregiver = shift.primary_phone !== '';
+  // Imported secure shifts use a placeholder caregiver row with no phone number.
+  const isCaregiver = shift.caregiver.phone === '';
 
   // ── Primary-side actions ─────────────────────────────────────────────────
 
-  function handleConfirm() {
-    Alert.alert(
-      'Confirm handoff',
-      `Has ${shift.caregiver.name} replied with the code CARE-${shift.confirmation_code}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Yes, confirm', onPress: async () => { await confirmShift(shift.id); onRefresh(); } },
-      ],
-    );
-  }
-
-  function handleCancel() {
-    Alert.alert('Cancel shift', 'Cancel this caregiver shift?', [
+  async function handlePrimaryCancel() {
+    Alert.alert('Cancel shift', `Cancel ${shift.caregiver.name}'s shift now?`, [
       { text: 'No', style: 'cancel' },
       {
-        text: 'Cancel shift', style: 'destructive',
-        onPress: async () => { await cancelShift(shift.id); onRefresh(); },
-      },
-    ]);
-  }
-
-  // Primary ends the shift → sends SHIFT_COMPLETE to caregiver (clean up their device)
-  async function handlePrimaryComplete() {
-    Alert.alert('End shift early', `End ${shift.caregiver.name}'s shift now?`, [
-      { text: 'No', style: 'cancel' },
-      {
-        text: 'End shift',
+        text: 'Cancel shift',
         onPress: async () => {
-          await completeShift(shift.id);
           try {
-            await defaultTransport.send({
-              phone: shift.caregiver.phone,
-              humanText: `Your caregiver shift has ended. Thank you, ${shift.caregiver.name}!`,
-              msg: { v: MSG_VERSION, type: 'SHIFT_COMPLETE', shiftId: shift.id },
-            });
+            if (shift.protocol_state === 'active' && shift.transfer_id) {
+              const cancelEnvelope = await createShiftCancelEnvelope({
+                shiftId: shift.id,
+                transferId: shift.transfer_id,
+                reason: 'Primary caregiver ended the shift early.',
+                expiresAt: shift.end_time,
+              });
+              await defaultTransport.send({
+                phone: shift.caregiver.phone,
+                humanText: `Your caregiver shift for ${who} has been cancelled by the primary caregiver.`,
+                msg: cancelEnvelope,
+              });
+            }
           } catch (e: any) {
             Alert.alert('SMS error', `Could not notify caregiver: ${e?.message ?? 'unknown'}.`);
+            return;
           }
+          await cancelShift(shift.id);
           onRefresh();
         },
       },
@@ -109,13 +111,33 @@ function ShiftCard({
 
   async function handleResendInvite() {
     try {
+      const delegated = entities.filter((entity) => {
+        try {
+          const ids = JSON.parse(shift.entity_ids) as string[];
+          return ids.includes('*') || ids.includes(entity.id);
+        } catch {
+          return true;
+        }
+      });
+      const medicationCount = (await Promise.all(
+        delegated.map((entity) => getMedications(entity.id)),
+      )).flat().length;
+      const inviteEnvelope = await createShiftInviteEnvelope({
+        shiftId: shift.id,
+        transferId: Crypto.randomUUID(),
+        primaryPhone: shift.primary_phone,
+        startTime: shift.start_time,
+        endTime: shift.end_time,
+        shiftVersion: (shift.shift_version ?? 1) + 1,
+        shiftNote: shift.notes,
+        patientCount: delegated.length,
+        medicationCount,
+        expiresAt: shift.end_time,
+      });
       await defaultTransport.send({
         phone: shift.caregiver.phone,
-        humanText: buildInviteSMS(shift.caregiver, [], shift),
-        msg: { v: MSG_VERSION, type: 'SHIFT_INVITE', shiftId: shift.id,
-          confirmationCode: shift.confirmation_code, startTime: shift.start_time,
-          endTime: shift.end_time, shiftNotes: shift.notes, primaryPhone: '',
-          entities: [], medications: [] },
+        humanText: buildInviteSMS(shift.caregiver, delegated.map((entity) => entity.name), shift),
+        msg: inviteEnvelope,
       });
     } catch (e: any) {
       Alert.alert(
@@ -127,27 +149,37 @@ function ShiftCard({
 
   // ── Caregiver-side actions ───────────────────────────────────────────────
 
-  // Caregiver ends shift → cleans up shared entities locally, sends SHIFT_HANDBACK
   async function handleCaregiverEnd() {
     Alert.alert(
       'End your shift',
-      'This will remove the shared patients from your app and notify the primary caregiver.',
+      'This will send your returned dosing events to the primary caregiver. Shared patients stay on this device until the primary confirms import.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'End shift',
-          style: 'destructive',
           onPress: async () => {
-            await deleteSharedShiftData(shift.id);
-            await completeShift(shift.id);
             try {
+              if (!shift.transfer_id || !shift.session_id || !shift.primary_phone) {
+                throw new Error('Shift is missing secure transport details.');
+              }
+              const summary = await summarizeOutgoingShiftEvents(shift.id);
+              const returnEnvelope = await createShiftReturnRequestEnvelope({
+                shiftId: shift.id,
+                transferId: shift.transfer_id,
+                sessionId: shift.session_id,
+                finalSeq: summary.finalSeq,
+                doseEventCount: summary.doseEventCount,
+                refillEventCount: summary.refillEventCount,
+                expiresAt: shift.end_time,
+              });
               await defaultTransport.send({
                 phone: shift.primary_phone,
-                humanText: 'Caregiver shift ended. Responsibility returned to you.',
-                msg: { v: MSG_VERSION, type: 'SHIFT_HANDBACK', shiftId: shift.id },
+                humanText: 'Caregiver shift ended. Returned dosing data is ready to import.',
+                msg: returnEnvelope,
               });
             } catch (e: any) {
-              Alert.alert('SMS error', `Shift ended locally but could not notify primary: ${e?.message ?? 'unknown'}.`);
+              Alert.alert('SMS error', `Could not notify primary: ${e?.message ?? 'unknown'}.`);
+              return;
             }
             onRefresh();
           },
@@ -164,7 +196,7 @@ function ShiftCard({
       <View style={card.topRow}>
         <View style={{ flex: 1 }}>
           <Text style={card.name}>
-            {isCaregiver ? `Primary: ${shift.caregiver.phone}` : shift.caregiver.name}
+            {isCaregiver ? `Primary: ${shift.primary_phone}` : shift.caregiver.name}
           </Text>
           <Text style={card.who}>
             {isCaregiver ? '🤝 You are the active caregiver' : who}
@@ -191,11 +223,11 @@ function ShiftCard({
       {shift.notes ? <Text style={card.notes}>📝 {shift.notes}</Text> : null}
 
       {/* Actions — split by role */}
-      {(shift.resolvedStatus === 'pending' || shift.resolvedStatus === 'confirmed' || shift.resolvedStatus === 'active') && (
+      {(shift.resolvedStatus === 'pending' || shift.resolvedStatus === 'confirmed' || shift.resolvedStatus === 'active' || shift.protocol_state === 'return_sent') && (
         <View style={card.actions}>
           {isCaregiver ? (
             // Caregiver's device: only relevant action is ending the shift
-            (shift.resolvedStatus === 'confirmed' || shift.resolvedStatus === 'active') && (
+            (shift.protocol_state === 'active' || shift.protocol_state === 'accepted_pending_session') && (
               <TouchableOpacity style={[card.actionBtn, card.endBtn]} onPress={handleCaregiverEnd}>
                 <Text style={[card.actionBtnText, card.endBtnText]}>End my shift</Text>
               </TouchableOpacity>
@@ -208,19 +240,13 @@ function ShiftCard({
                   <TouchableOpacity style={card.actionBtn} onPress={handleResendInvite}>
                     <Text style={card.actionBtnText}>Resend SMS</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={[card.actionBtn, card.confirmBtn]} onPress={handleConfirm}>
-                    <Text style={[card.actionBtnText, card.confirmBtnText]}>Mark Confirmed</Text>
-                  </TouchableOpacity>
                 </>
               )}
-              {shift.resolvedStatus === 'active' && (
-                <TouchableOpacity style={[card.actionBtn, card.endBtn]} onPress={handlePrimaryComplete}>
-                  <Text style={[card.actionBtnText, card.endBtnText]}>End shift</Text>
-                </TouchableOpacity>
-              )}
-              {shift.resolvedStatus !== 'active' && (
-                <TouchableOpacity style={[card.actionBtn, card.cancelBtn]} onPress={handleCancel}>
-                  <Text style={[card.actionBtnText, card.cancelBtnText]}>Cancel</Text>
+              {(shift.resolvedStatus === 'pending' || shift.resolvedStatus === 'active' || shift.resolvedStatus === 'confirmed') && (
+                <TouchableOpacity style={[card.actionBtn, card.cancelBtn]} onPress={handlePrimaryCancel}>
+                  <Text style={[card.actionBtnText, card.cancelBtnText]}>
+                    {shift.resolvedStatus === 'pending' ? 'Cancel' : 'Cancel shift'}
+                  </Text>
                 </TouchableOpacity>
               )}
             </>

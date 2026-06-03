@@ -24,6 +24,20 @@ export interface Caregiver {
 }
 
 export type ShiftStatus = 'pending' | 'confirmed' | 'active' | 'completed' | 'cancelled';
+export type SecureShiftProtocolState =
+  | 'draft'
+  | 'invite_received'
+  | 'invite_sent'
+  | 'accepted'
+  | 'accepted_pending_session'
+  | 'active'
+  | 'return_sent'
+  | 'return_pending_import'
+  | 'awaiting_cleanup_ack'
+  | 'completed'
+  | 'cancelled'
+  | 'expired'
+  | 'rejected';
 
 export interface CaregiverShift {
   id: string;
@@ -35,6 +49,12 @@ export interface CaregiverShift {
   confirmation_code: string;
   notes: string | null;
   primary_phone: string;    // non-empty only on the caregiver's device
+  protocol_state: SecureShiftProtocolState;
+  transfer_id: string | null;
+  shift_version: number;
+  session_id: string | null;
+  final_seq: number | null;
+  last_applied_seq: number;
   created_at: string;
 }
 
@@ -67,6 +87,12 @@ function mapRow(row: any): ShiftWithCaregiver {
     confirmation_code: row.confirmation_code,
     notes: row.notes ?? null,
     primary_phone: row.primary_phone ?? '',
+    protocol_state: row.protocol_state ?? 'draft',
+    transfer_id: row.transfer_id ?? null,
+    shift_version: row.shift_version ?? 1,
+    session_id: row.session_id ?? null,
+    final_seq: row.final_seq ?? null,
+    last_applied_seq: row.last_applied_seq ?? 0,
     created_at: row.created_at,
   };
   return {
@@ -129,6 +155,12 @@ export async function createShift(
     confirmation_code: generateCode(),
     notes: notes ?? null,
     primary_phone: '',
+    protocol_state: 'draft',
+    transfer_id: null,
+    shift_version: 1,
+    session_id: null,
+    final_seq: null,
+    last_applied_seq: 0,
     created_at: now(),
   };
   await db.runAsync(
@@ -139,6 +171,11 @@ export async function createShift(
      shift.status, shift.confirmation_code, shift.notes, shift.created_at],
   );
   return shift;
+}
+
+export async function getShiftById(id: string): Promise<ShiftWithCaregiver | null> {
+  const row = await getDb().getFirstAsync<any>(`${JOIN} WHERE s.id = ? LIMIT 1`, [id]);
+  return row ? mapRow(row) : null;
 }
 
 export async function confirmShift(id: string): Promise<void> {

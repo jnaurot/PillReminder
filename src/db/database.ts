@@ -4,7 +4,7 @@ import { openDatabaseSync } from 'expo-sqlite';
 import * as FileSystem from 'expo-file-system/legacy';
 import { getOrCreateDbKey } from './cryptoKey';
 
-const SCHEMA_VERSION = 12;
+const SCHEMA_VERSION = 13;
 const ENC_DB_NAME   = 'pillreminder_enc.db';
 const LEGACY_DB_NAME = 'pillreminder.db';
 
@@ -138,7 +138,13 @@ function createSchema(inner: DB): void {
     deleted_at      TEXT,
     shift_source    TEXT NOT NULL DEFAULT 'local',
     shared_shift_id TEXT,
-    primary_phone   TEXT
+    primary_phone   TEXT,
+    delegation_owner_device_id TEXT,
+    delegation_imported_at TEXT,
+    delegation_expires_at TEXT,
+    delegation_cleanup_pending INTEGER NOT NULL DEFAULT 0,
+    delegation_version INTEGER,
+    delegation_source_transfer_id TEXT
   )`);
 
   inner.executeSync(`CREATE TABLE IF NOT EXISTS medications (
@@ -157,6 +163,11 @@ function createSchema(inner: DB): void {
     rxcui                TEXT,
     drug_info            TEXT,
     pill_appearance      TEXT,
+    shared_shift_id      TEXT,
+    delegation_imported_at TEXT,
+    delegation_cleanup_pending INTEGER NOT NULL DEFAULT 0,
+    delegation_version INTEGER,
+    delegation_source_transfer_id TEXT,
     created_at           TEXT NOT NULL,
     updated_at           TEXT NOT NULL,
     deleted_at           TEXT
@@ -180,6 +191,12 @@ function createSchema(inner: DB): void {
     skipped       INTEGER NOT NULL DEFAULT 0,
     is_catchup    INTEGER NOT NULL DEFAULT 0,
     notes         TEXT,
+    protocol_event_id TEXT,
+    protocol_shift_id TEXT,
+    protocol_seq INTEGER,
+    protocol_sender_role TEXT,
+    protocol_recorded_at TEXT,
+    protocol_applied_at TEXT,
     created_at    TEXT NOT NULL
   )`);
 
@@ -197,8 +214,27 @@ function createSchema(inner: DB): void {
     start_time        TEXT NOT NULL,
     end_time          TEXT NOT NULL,
     status            TEXT NOT NULL DEFAULT 'pending',
+    protocol_state    TEXT NOT NULL DEFAULT 'draft',
+    transfer_id       TEXT,
+    shift_version     INTEGER NOT NULL DEFAULT 1,
+    session_id        TEXT,
+    primary_device_id TEXT,
+    alternate_device_id TEXT,
+    primary_identity_key TEXT,
+    alternate_identity_key TEXT,
+    primary_ephemeral_key TEXT,
+    alternate_ephemeral_key TEXT,
+    invite_nonce      TEXT,
+    accepted_at       TEXT,
+    activated_at      TEXT,
+    return_requested_at TEXT,
+    return_acked_at   TEXT,
+    cleanup_completed_at TEXT,
+    final_seq         INTEGER,
+    last_applied_seq  INTEGER NOT NULL DEFAULT 0,
     confirmation_code TEXT NOT NULL,
     notes             TEXT,
+    cancel_reason     TEXT,
     primary_phone     TEXT NOT NULL DEFAULT '',
     created_at        TEXT NOT NULL
   )`);
@@ -207,6 +243,57 @@ function createSchema(inner: DB): void {
     alarm_id TEXT PRIMARY KEY,
     med_id   TEXT NOT NULL
   )`);
+
+  inner.executeSync(`CREATE TABLE IF NOT EXISTS refill_events (
+    id TEXT PRIMARY KEY,
+    protocol_event_id TEXT NOT NULL UNIQUE,
+    shift_id TEXT NOT NULL,
+    medication_id TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    quantity INTEGER NOT NULL,
+    refill_date TEXT NOT NULL,
+    days_supply INTEGER,
+    unit TEXT NOT NULL,
+    recorded_at TEXT NOT NULL,
+    applied_at TEXT NOT NULL
+  )`);
+
+  inner.executeSync(`CREATE TABLE IF NOT EXISTS protocol_message_receipts (
+    id TEXT PRIMARY KEY,
+    shift_id TEXT NOT NULL,
+    message_type TEXT NOT NULL,
+    nonce TEXT NOT NULL UNIQUE,
+    sender_identity_key TEXT NOT NULL,
+    received_at TEXT NOT NULL,
+    expires_at TEXT,
+    signature_valid INTEGER NOT NULL,
+    status TEXT NOT NULL
+  )`);
+
+  inner.executeSync(`CREATE TABLE IF NOT EXISTS protocol_event_receipts (
+    protocol_event_id TEXT PRIMARY KEY,
+    shift_id TEXT NOT NULL,
+    seq INTEGER NOT NULL,
+    received_at TEXT NOT NULL,
+    applied_at TEXT,
+    status TEXT NOT NULL
+  )`);
+
+  inner.executeSync(`CREATE TABLE IF NOT EXISTS device_identity (
+    device_id TEXT PRIMARY KEY,
+    encryption_public_key TEXT NOT NULL,
+    encryption_private_key TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  )`);
+
+  inner.executeSync(`CREATE TABLE IF NOT EXISTS shift_peer_keys (
+    shift_id TEXT PRIMARY KEY,
+    peer_role TEXT NOT NULL,
+    peer_identity_key TEXT NOT NULL,
+    peer_ephemeral_key TEXT,
+    established_at TEXT
+  )`);
+
 }
 
 function insertDefaultSettings(inner: DB): void {
@@ -261,7 +348,45 @@ export async function initDb(): Promise<void> {
   addCol('medications', 'drug_info',            'TEXT');
   addCol('medications', 'pill_appearance',      'TEXT');
   addCol('medications', 'missed_window_minutes', 'INTEGER');
+  addCol('medications', 'shared_shift_id', 'TEXT');
+  addCol('medications', 'delegation_imported_at', 'TEXT');
+  addCol('medications', 'delegation_cleanup_pending', 'INTEGER NOT NULL DEFAULT 0');
+  addCol('medications', 'delegation_version', 'INTEGER');
+  addCol('medications', 'delegation_source_transfer_id', 'TEXT');
   addCol('dose_logs',   'caregiver_id',         'TEXT');
+  addCol('dose_logs',   'protocol_event_id',    'TEXT');
+  addCol('dose_logs',   'protocol_shift_id',    'TEXT');
+  addCol('dose_logs',   'protocol_seq',         'INTEGER');
+  addCol('dose_logs',   'protocol_sender_role', 'TEXT');
+  addCol('dose_logs',   'protocol_recorded_at', 'TEXT');
+  addCol('dose_logs',   'protocol_applied_at',  'TEXT');
+  addCol('entities',    'delegation_owner_device_id', 'TEXT');
+  addCol('entities',    'delegation_imported_at', 'TEXT');
+  addCol('entities',    'delegation_expires_at', 'TEXT');
+  addCol('entities',    'delegation_cleanup_pending', 'INTEGER NOT NULL DEFAULT 0');
+  addCol('entities',    'delegation_version', 'INTEGER');
+  addCol('entities',    'delegation_source_transfer_id', 'TEXT');
+  addCol('caregiver_shifts', 'protocol_state', "TEXT NOT NULL DEFAULT 'draft'");
+  addCol('caregiver_shifts', 'transfer_id', 'TEXT');
+  addCol('caregiver_shifts', 'shift_version', 'INTEGER NOT NULL DEFAULT 1');
+  addCol('caregiver_shifts', 'session_id', 'TEXT');
+  addCol('caregiver_shifts', 'primary_device_id', 'TEXT');
+  addCol('caregiver_shifts', 'alternate_device_id', 'TEXT');
+  addCol('caregiver_shifts', 'primary_identity_key', 'TEXT');
+  addCol('caregiver_shifts', 'alternate_identity_key', 'TEXT');
+  addCol('caregiver_shifts', 'primary_ephemeral_key', 'TEXT');
+  addCol('caregiver_shifts', 'alternate_ephemeral_key', 'TEXT');
+  addCol('caregiver_shifts', 'invite_nonce', 'TEXT');
+  addCol('caregiver_shifts', 'accepted_at', 'TEXT');
+  addCol('caregiver_shifts', 'activated_at', 'TEXT');
+  addCol('caregiver_shifts', 'return_requested_at', 'TEXT');
+  addCol('caregiver_shifts', 'return_acked_at', 'TEXT');
+  addCol('caregiver_shifts', 'cleanup_completed_at', 'TEXT');
+  addCol('caregiver_shifts', 'final_seq', 'INTEGER');
+  addCol('caregiver_shifts', 'last_applied_seq', 'INTEGER NOT NULL DEFAULT 0');
+  addCol('caregiver_shifts', 'cancel_reason', 'TEXT');
+  inner.executeSync(`CREATE UNIQUE INDEX IF NOT EXISTS idx_dose_logs_protocol_event_id
+    ON dose_logs(protocol_event_id)`);
 
   // Incremental migrations on existing encrypted DB.
   if (currentVersion > 0) {

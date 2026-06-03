@@ -1,3 +1,4 @@
+import * as Crypto from 'expo-crypto';
 import { useEffect, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
@@ -12,7 +13,12 @@ import { todayStr } from '../../../../../src/db/doseLogs';
 import { getSettings } from '../../../../../src/db/settings';
 import { getDb } from '../../../../../src/db/database';
 import { defaultTransport } from '../../../../../src/messaging/transport';
-import { MSG_VERSION } from '../../../../../src/messaging/types';
+import {
+  createRefillEventBatchEnvelope,
+  getNextProtocolEventSeq,
+  getShiftTransportContext,
+  recordOutgoingRefillProtocolEvent,
+} from '../../../../../src/messaging/secureProtocol';
 import DateInput from '../../../../../src/components/DateInput';
 import { parseSchedule, type Medication } from '../../../../../src/types';
 import { scheduleRefillAlert } from '../../../../../src/notifications/scheduler';
@@ -124,20 +130,42 @@ export default function RefillScreen() {
                 text: 'Send update',
                 onPress: async () => {
                   try {
+                    const context = await getShiftTransportContext(shiftId);
+                    const seq = await getNextProtocolEventSeq(shiftId);
+                    const eventId = Crypto.randomUUID();
+                    const recordedAt = new Date().toISOString();
+                    const envelope = await createRefillEventBatchEnvelope({
+                      shiftId: context.shiftId,
+                      transferId: context.transferId,
+                      sessionId: context.sessionId,
+                      events: [{
+                        event_id: eventId,
+                        seq,
+                        patient_id: medication.entity_id,
+                        medication_id: medId,
+                        refill_date: refillDate || todayStr(),
+                        quantity: qty,
+                        days_supply: ds ?? null,
+                        unit,
+                        recorded_at: recordedAt,
+                      }],
+                      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+                    });
                     await defaultTransport.send({
                       phone: primaryPhone,
                       humanText: `Refill logged: ${medication.name} — ${qty} ${unit}${ds ? `, ${ds}d supply` : ''}.`,
-                      msg: {
-                        v: MSG_VERSION,
-                        type: 'REFILL_UPDATE',
-                        shiftId,
-                        entityId: medication.entity_id,
-                        medicationId: medId,
-                        quantity: qty,
-                        refillDate: refillDate || todayStr(),
-                        daysSupply: ds ?? null,
-                        unit,
-                      },
+                      msg: envelope,
+                    });
+                    await recordOutgoingRefillProtocolEvent({
+                      eventId,
+                      shiftId,
+                      medicationId: medId,
+                      seq,
+                      quantity: qty,
+                      refillDate: refillDate || todayStr(),
+                      daysSupply: ds ?? null,
+                      unit,
+                      recordedAt,
                     });
                   } catch (e: any) {
                     Alert.alert('SMS error', e?.message ?? 'Could not send update.');

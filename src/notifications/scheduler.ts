@@ -216,7 +216,7 @@ async function scheduleAlarmForDate(
         sticky: true,
         channelId,
         data: { medId: med.id, scheduledAt: `${dateStr}T${time}:00`, type: 'alarm' },
-      },
+      } as any,
       trigger: {
         type: N.SchedulableTriggerInputTypes.DATE,
         date: alarmTime,

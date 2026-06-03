@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import * as Crypto from 'expo-crypto';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView,
   StyleSheet, Alert, ActivityIndicator, KeyboardAvoidingView, Platform,
@@ -7,12 +8,14 @@ import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Contacts from 'expo-contacts';
 import { getEntities } from '../../../src/db/entities';
+import { getMedications } from '../../../src/db/medications';
 import {
   getCaregivers, upsertCaregiver, createShift,
-  buildInvitePayload, buildInviteSMS, type Caregiver,
+  buildInviteSMS, type Caregiver,
 } from '../../../src/db/caregivers';
 import { getSettings } from '../../../src/db/settings';
 import { defaultTransport } from '../../../src/messaging/transport';
+import { createShiftInviteEnvelope } from '../../../src/messaging/secureProtocol';
 import DateInput from '../../../src/components/DateInput';
 import type { Entity } from '../../../src/types/index';
 import { todayStr, nowTimeStr, tomorrowStr } from '../../../src/utils/dateTime';
@@ -104,6 +107,11 @@ export default function NewShiftScreen() {
 
     setSaving(true);
     const resolvedPrimaryPhone = primaryPhone.replace(/\D/g, '');
+    if (!resolvedPrimaryPhone) {
+      Alert.alert('Primary phone number required', 'Set your phone number in Settings before creating a caregiver shift so secure updates can return to you.');
+      setSaving(false);
+      return;
+    }
     let shift: Awaited<ReturnType<typeof createShift>> | null = null;
     let cg: Awaited<ReturnType<typeof upsertCaregiver>> | null = null;
     try {
@@ -124,33 +132,26 @@ export default function NewShiftScreen() {
     try {
       const isAvailable = await defaultTransport.isAvailable();
       if (isAvailable) {
-        if (resolvedPrimaryPhone) {
-          const invitePayload = await buildInvitePayload(shift!, resolvedPrimaryPhone, delegatedEntities);
-          const entityNames = delegatedEntities.map((e) => e.name);
-          await defaultTransport.send({
-            phone: phone.replace(/\D/g, ''),
-            humanText: buildInviteSMS(cg!, entityNames, shift!),
-            msg: invitePayload,
-          });
-        } else {
-          const entityNames = delegatedEntities.map((e) => e.name);
-          await defaultTransport.send({
-            phone: phone.replace(/\D/g, ''),
-            humanText: buildInviteSMS(cg!, entityNames, shift!),
-            msg: {
-              v: 1,
-              type: 'SHIFT_INVITE',
-              shiftId: shift!.id,
-              confirmationCode: shift!.confirmation_code,
-              startTime: shift!.start_time,
-              endTime: shift!.end_time,
-              shiftNotes: shift!.notes,
-              primaryPhone: '',
-              entities: [],
-              medications: [],
-            },
-          });
-        }
+        const inviteEnvelope = await createShiftInviteEnvelope({
+          shiftId: shift!.id,
+          transferId: Crypto.randomUUID(),
+          primaryPhone: resolvedPrimaryPhone,
+          startTime: shift!.start_time,
+          endTime: shift!.end_time,
+          shiftVersion: 1,
+          shiftNote: shift!.notes,
+          patientCount: delegatedEntities.length,
+          medicationCount: (await Promise.all(
+            delegatedEntities.map((entity) => getMedications(entity.id)),
+          )).flat().length,
+          expiresAt: shift!.end_time,
+        });
+        const entityNames = delegatedEntities.map((e) => e.name);
+        await defaultTransport.send({
+          phone: phone.replace(/\D/g, ''),
+          humanText: buildInviteSMS(cg!, entityNames, shift!),
+          msg: inviteEnvelope,
+        });
       } else {
         // SMS unavailable — show code so user can share manually.
         Alert.alert(
