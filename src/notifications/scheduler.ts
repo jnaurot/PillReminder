@@ -77,6 +77,49 @@ export async function cancelMissedAlert(medId: string, scheduledAtStr: string): 
   } catch {}
 }
 
+async function scheduledReminderIdForDose(medId: string, scheduledAtStr: string): Promise<string | null> {
+  try {
+    const db = getDb();
+    const med = await db.getFirstAsync<Pick<Medication, 'schedule'>>(
+      'SELECT schedule FROM medications WHERE id = ?',
+      [medId],
+    );
+    if (!med) return null;
+
+    const schedule = parseSchedule(med.schedule);
+    const [dateStr, timePart] = scheduledAtStr.split('T');
+    const timeHHmm = timePart?.slice(0, 5) ?? '';
+    if (!dateStr || !timeHHmm) return null;
+
+    switch (schedule.type) {
+      case 'fixed_times':
+        return remId(medId, timeHHmm.replace(':', ''));
+      case 'weekly': {
+        const weekday = new Date(`${dateStr}T00:00:00`).getDay();
+        return remId(medId, `${weekday}-${timeHHmm.replace(':', '')}`);
+      }
+      case 'monthly':
+        return remId(medId, `${dateStr}-${timeHHmm.replace(':', '')}`);
+      case 'prn':
+        return null;
+    }
+  } catch {}
+  return null;
+}
+
+export async function dismissScheduledReminderForDose(
+  medId: string,
+  scheduledAtStr: string,
+): Promise<void> {
+  const N = await getN();
+  if (!N) return;
+  try {
+    const id = await scheduledReminderIdForDose(medId, scheduledAtStr);
+    if (!id) return;
+    await N.dismissNotificationAsync(id).catch(() => {});
+  } catch {}
+}
+
 // ─── Cancel the native alarm for a specific scheduled dose ────────────────────
 
 export async function cancelAlarmAlert(medId: string, scheduledAtStr: string): Promise<void> {
@@ -161,7 +204,7 @@ async function scheduleMissedAlertForDate(
       title: `Missed: ${med.name}`,
       body: `${time} dose not logged — take or skip it now.`,
       sound: true,
-      data: { medId: med.id, scheduledAt: `${dateStr}T${time}:00` },
+      data: { medId: med.id, scheduledAt: `${dateStr}T${time}:00`, type: 'missed' },
     },
     trigger: {
       type: N.SchedulableTriggerInputTypes.DATE,

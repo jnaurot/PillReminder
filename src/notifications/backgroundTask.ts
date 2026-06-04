@@ -1,5 +1,6 @@
 import { Vibration } from 'react-native';
 import * as TaskManager from 'expo-task-manager';
+import { dismissScheduledReminderForDose } from './scheduler';
 
 export const ALARM_VIBRATION_TASK = 'ALARM-VIBRATION-TASK';
 
@@ -9,9 +10,16 @@ export const ALARM_VIBRATION_TASK = 'ALARM-VIBRATION-TASK';
 TaskManager.defineTask(ALARM_VIBRATION_TASK, async ({ data, error }: any) => {
   if (error || !data) return;
   try {
-    const type = data.notification?.request?.content?.data?.type;
+    const payload = data.notification?.request?.content?.data;
+    const type = payload?.type;
     if (type === 'alarm') {
       Vibration.vibrate([0, 5000]);
+    } else if (type === 'missed') {
+      const medId = payload?.medId;
+      const scheduledAt = payload?.scheduledAt;
+      if (typeof medId === 'string' && typeof scheduledAt === 'string') {
+        await dismissScheduledReminderForDose(medId, scheduledAt);
+      }
     }
   } catch {}
 });

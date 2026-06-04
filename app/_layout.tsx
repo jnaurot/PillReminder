@@ -7,6 +7,7 @@ import Constants from 'expo-constants';
 import { initDb, getDb } from '../src/db/database';
 import { getSettings } from '../src/db/settings';
 import { setFlagSecure } from '../src/native/flagSecure';
+import '../src/notifications/backgroundTask';
 
 const isExpoGo = Constants.executionEnvironment === 'storeClient';
 
@@ -30,8 +31,10 @@ async function schedulePathForNotif(data: Record<string, unknown>): Promise<stri
 async function initNotifications() {
   if (isExpoGo) return;
   const { setNotificationHandler, addNotificationReceivedListener } = await import('expo-notifications');
+  const Notifications = await import('expo-notifications');
   const { requestNotificationPermissions } = await import('../src/notifications/permissions');
-  const { rescheduleAll } = await import('../src/notifications/scheduler');
+  const { ALARM_VIBRATION_TASK } = await import('../src/notifications/backgroundTask');
+  const { dismissScheduledReminderForDose, rescheduleAll } = await import('../src/notifications/scheduler');
 
   setNotificationHandler({
     handleNotification: async () => ({
@@ -44,14 +47,19 @@ async function initNotifications() {
 
   // Foreground: vibrate directly when an alarm notification arrives.
   addNotificationReceivedListener((notification) => {
-    const type = (notification.request.content.data as any)?.type;
+    const data = notification.request.content.data as any;
+    const type = data?.type;
     if (type === 'alarm') {
       Vibration.vibrate([0, 5000]);
+    } else if (type === 'missed' && typeof data?.medId === 'string' && typeof data?.scheduledAt === 'string') {
+      dismissScheduledReminderForDose(data.medId, data.scheduledAt).catch(() => {});
     }
   });
 
   const granted = await requestNotificationPermissions();
-  if (granted) await rescheduleAll();
+  if (!granted) return;
+  await Notifications.registerTaskAsync(ALARM_VIBRATION_TASK).catch(() => {});
+  await rescheduleAll();
 }
 
 // Called by index.tsx after successful auth so the inactivity timer resumes.
