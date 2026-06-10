@@ -1,9 +1,9 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, SectionList, TouchableOpacity,
   StyleSheet, ActivityIndicator, RefreshControl,
 } from 'react-native';
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getAllDosesForDate, todayStr, type ScheduledDose, type EntityDoses } from '../src/db/doseLogs';
 import { DoseCard } from '../src/components/DoseCard';
@@ -17,10 +17,18 @@ function initials(name: string): string {
 }
 
 export default function TodayScreen() {
+  const { medId, scheduledAt, focusToken } = useLocalSearchParams<{
+    medId?: string;
+    scheduledAt?: string;
+    focusToken?: string;
+  }>();
   const [sections, setSections] = useState<Section[]>([]);
   const [activeShift, setActiveShift] = useState<ShiftWithCaregiver | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [highlightedKey, setHighlightedKey] = useState<string | null>(null);
+  const listRef = useRef<SectionList<ScheduledDose, Section>>(null);
+  const handledFocusTokenRef = useRef<string | null>(null);
   const date = todayStr();
 
   const [delegatedIds, setDelegatedIds] = useState<Set<string>>(new Set());
@@ -55,6 +63,52 @@ export default function TodayScreen() {
   }, [date]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  const focusTarget = typeof medId === 'string' && medId
+    ? {
+        medId,
+        scheduledAt: typeof scheduledAt === 'string' ? scheduledAt : null,
+        focusToken: typeof focusToken === 'string' ? focusToken : null,
+      }
+    : null;
+
+  useEffect(() => {
+    if (!focusTarget || sections.length === 0) return;
+    if (!focusTarget.focusToken || handledFocusTokenRef.current === focusTarget.focusToken) return;
+
+    let found:
+      | { sectionIndex: number; itemIndex: number; key: string }
+      | null = null;
+
+    for (let sectionIndex = 0; sectionIndex < sections.length && !found; sectionIndex++) {
+      const items = sections[sectionIndex].data;
+      for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
+        const item = items[itemIndex];
+        const medMatches = item.medication.id === focusTarget.medId;
+        const scheduledMatches = !focusTarget.scheduledAt || item.scheduledAt === focusTarget.scheduledAt;
+        if (medMatches && scheduledMatches) {
+          found = { sectionIndex, itemIndex, key: item.key };
+          break;
+        }
+      }
+    }
+
+    handledFocusTokenRef.current = focusTarget.focusToken;
+    if (!found) return;
+
+    const timer = setTimeout(() => {
+      listRef.current?.scrollToLocation({
+        sectionIndex: found!.sectionIndex,
+        itemIndex: found!.itemIndex,
+        animated: true,
+        viewOffset: 120,
+      });
+      setHighlightedKey(found!.key);
+      setTimeout(() => setHighlightedKey((current) => (current === found!.key ? null : current)), 2200);
+    }, 150);
+
+    return () => clearTimeout(timer);
+  }, [focusTarget, sections]);
 
   async function handleRefresh() {
     setRefreshing(true);
@@ -154,6 +208,7 @@ export default function TodayScreen() {
         </View>
       ) : (
         <SectionList
+          ref={listRef}
           sections={sections}
           keyExtractor={(item) => item.key}
           renderSectionHeader={({ section }) => (
@@ -175,6 +230,7 @@ export default function TodayScreen() {
               allDoses={section.doses}
               onAction={load}
               isDelegated={delegatedIds.has(section.entityId)}
+              isHighlighted={item.key === highlightedKey}
             />
           )}
           contentContainerStyle={styles.list}

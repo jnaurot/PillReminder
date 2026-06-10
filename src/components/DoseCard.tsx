@@ -13,7 +13,11 @@ import {
 import type { DoseLog } from '../types/index';
 import { parseSchedule, parseInteractions } from '../types/index';
 import type { MedicationInteraction } from '../types/index';
-import { cancelMissedAlert, cancelAlarmAlert } from '../notifications/scheduler';
+import {
+  cancelMissedAlert,
+  cancelAlarmAlert,
+  dismissScheduledReminderForDose,
+} from '../notifications/scheduler';
 import { defaultTransport } from '../messaging/transport';
 import {
   annotateDoseLogProtocolEvent,
@@ -192,11 +196,13 @@ export function DoseCard({
   allDoses,
   onAction,
   isDelegated = false,
+  isHighlighted = false,
 }: {
   dose: ScheduledDose;
   allDoses: ScheduledDose[];
   onAction: () => void;
   isDelegated?: boolean;
+  isHighlighted?: boolean;
 }) {
   const [showNoteModal, setShowNoteModal] = useState(false);
   const [showPrnTakeModal, setShowPrnTakeModal] = useState(false);
@@ -368,11 +374,12 @@ export function DoseCard({
     );
 
     if (missed.length === 0 || policy === 'none') {
-      const logs = await logDoseTaken(dose.medication.id, dose.scheduledAt);
-      if (dose.scheduledAt) {
-        await cancelMissedAlert(dose.medication.id, dose.scheduledAt);
-        await cancelAlarmAlert(dose.medication.id, dose.scheduledAt);
-      }
+              const logs = await logDoseTaken(dose.medication.id, dose.scheduledAt);
+              if (dose.scheduledAt) {
+                await dismissScheduledReminderForDose(dose.medication.id, dose.scheduledAt);
+                await cancelMissedAlert(dose.medication.id, dose.scheduledAt);
+                await cancelAlarmAlert(dose.medication.id, dose.scheduledAt);
+              }
       await maybeSendDoseEvents(logs.map((log) => ({
         log,
         eventType: 'dose_taken' as const,
@@ -397,10 +404,12 @@ export function DoseCard({
                 missedDose.scheduledAt ?? undefined,
               );
               if (dose.scheduledAt) {
+                await dismissScheduledReminderForDose(dose.medication.id, dose.scheduledAt);
                 await cancelMissedAlert(dose.medication.id, dose.scheduledAt);
                 await cancelAlarmAlert(dose.medication.id, dose.scheduledAt);
               }
               if (missedDose.scheduledAt) {
+                await dismissScheduledReminderForDose(dose.medication.id, missedDose.scheduledAt);
                 await cancelMissedAlert(dose.medication.id, missedDose.scheduledAt);
                 await cancelAlarmAlert(dose.medication.id, missedDose.scheduledAt);
               }
@@ -429,10 +438,12 @@ export function DoseCard({
               const skippedLogs = await logDoseSkipped(dose.medication.id, missedDose.scheduledAt!);
               const takenLogs = await logDoseTaken(dose.medication.id, dose.scheduledAt);
               if (dose.scheduledAt) {
+                await dismissScheduledReminderForDose(dose.medication.id, dose.scheduledAt);
                 await cancelMissedAlert(dose.medication.id, dose.scheduledAt);
                 await cancelAlarmAlert(dose.medication.id, dose.scheduledAt);
               }
               if (missedDose.scheduledAt) {
+                await dismissScheduledReminderForDose(dose.medication.id, missedDose.scheduledAt);
                 await cancelMissedAlert(dose.medication.id, missedDose.scheduledAt);
                 await cancelAlarmAlert(dose.medication.id, missedDose.scheduledAt);
               }
@@ -467,6 +478,7 @@ export function DoseCard({
           style: 'destructive',
           onPress: async () => {
             const logs = await logDoseSkipped(dose.medication.id, dose.scheduledAt!);
+            await dismissScheduledReminderForDose(dose.medication.id, dose.scheduledAt!);
             await cancelMissedAlert(dose.medication.id, dose.scheduledAt!);
             await cancelAlarmAlert(dose.medication.id, dose.scheduledAt!);
             await maybeSendDoseEvents(logs.map((log) => ({
@@ -494,6 +506,7 @@ export function DoseCard({
           { borderLeftColor: dose.medication.color },
           locked && card.containerLocked,
           isDelegated && card.containerDelegated,
+          isHighlighted && card.containerHighlighted,
         ]}
         onLongPress={settled ? handleLongPress : undefined}
         delayLongPress={400}
@@ -620,6 +633,13 @@ export const card = StyleSheet.create({
     backgroundColor: '#FFFFFF', borderRadius: 14, borderLeftWidth: 5,
     padding: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.06, shadowRadius: 4, elevation: 2, gap: 6,
+  },
+  containerHighlighted: {
+    backgroundColor: '#FFF7ED',
+    shadowColor: '#F59E0B',
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
+    elevation: 5,
   },
   containerLocked: { backgroundColor: '#F8FAFC', opacity: 0.7 },
   containerDelegated: { opacity: 0.6, backgroundColor: '#F8FAFC' },

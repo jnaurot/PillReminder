@@ -14,9 +14,7 @@ function navigateAfterAuth() {
     // Deep link takes priority — go straight to the incoming screen.
     router.replace(deepLink as any);
   } else if (notifRoute) {
-    router.replace('/today');
-    // Push the notification target onto the stack after the replace settles.
-    setTimeout(() => router.push(notifRoute as any), 100);
+    router.replace(notifRoute as any);
   } else {
     router.replace('/today');
   }

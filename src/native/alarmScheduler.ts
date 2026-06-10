@@ -22,9 +22,11 @@ export function scheduleAlarmNative(
   body: string,
   fireTimeMs: number,
   channelId: string,
+  medId: string,
+  scheduledAt: string,
 ): void {
   ensureModule();
-  AlarmScheduler.scheduleAlarm(hashId(id), title, body, fireTimeMs, channelId);
+  AlarmScheduler.scheduleAlarm(hashId(id), title, body, fireTimeMs, channelId, medId, scheduledAt);
 }
 
 export function cancelAlarmNative(id: string): void {

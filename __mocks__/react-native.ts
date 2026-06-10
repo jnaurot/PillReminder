@@ -9,6 +9,7 @@ export const StyleSheet = {
 };
 export const SafeAreaView = 'SafeAreaView';
 export const Platform = { OS: 'ios' };
+export const NativeModules = {};
 export const Vibration = { vibrate: jest.fn() };
 export const Alert = {
   alert: jest.fn(),

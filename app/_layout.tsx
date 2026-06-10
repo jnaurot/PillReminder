@@ -4,29 +4,12 @@ import { Alert, AppState, View, ActivityIndicator, Vibration } from 'react-nativ
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as Linking from 'expo-linking';
 import Constants from 'expo-constants';
-import { initDb, getDb } from '../src/db/database';
+import { initDb } from '../src/db/database';
 import { getSettings } from '../src/db/settings';
 import { setFlagSecure } from '../src/native/flagSecure';
 import '../src/notifications/backgroundTask';
 
 const isExpoGo = Constants.executionEnvironment === 'storeClient';
-
-// Resolve the entity schedule path for a notification's data payload.
-async function schedulePathForNotif(data: Record<string, unknown>): Promise<string | null> {
-  const medId = data?.medId;
-  if (typeof medId !== 'string') return null;
-  try {
-    const db = getDb();
-    const row = await db.getFirstAsync<{ entity_id: string }>(
-      'SELECT entity_id FROM medications WHERE id = ?',
-      [medId],
-    );
-    if (!row) return null;
-    return `/entities/${row.entity_id}/history`;
-  } catch {
-    return null;
-  }
-}
 
 async function initNotifications() {
   if (isExpoGo) return;
@@ -34,15 +17,26 @@ async function initNotifications() {
   const Notifications = await import('expo-notifications');
   const { requestNotificationPermissions } = await import('../src/notifications/permissions');
   const { ALARM_VIBRATION_TASK } = await import('../src/notifications/backgroundTask');
-  const { dismissScheduledReminderForDose, rescheduleAll } = await import('../src/notifications/scheduler');
+  const {
+    dismissScheduledReminderForDose,
+    rescheduleAll,
+    shouldDisplayDoseNotification,
+  } = await import('../src/notifications/scheduler');
 
   setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowBanner: true,
-      shouldShowList: true,
-      shouldPlaySound: true,
-      shouldSetBadge: false,
-    }),
+    handleNotification: async (notification) => {
+      const shouldShow = await shouldDisplayDoseNotification(
+        notification.request.identifier,
+        (notification.request.content.data ?? {}) as Record<string, unknown>,
+        notification.date ? new Date(notification.date) : new Date(),
+      );
+      return {
+        shouldShowBanner: shouldShow,
+        shouldShowList: shouldShow,
+        shouldPlaySound: shouldShow,
+        shouldSetBadge: false,
+      };
+    },
   });
 
   // Foreground: vibrate directly when an alarm notification arrives.
@@ -155,6 +149,10 @@ export default function RootLayout() {
         if (!url.startsWith('pillreminder://')) return;
         const path = extractDeepLinkPath(url);
         if (!path) return;
+        if (path.startsWith('/today')) {
+          router.push(path as any);
+          return;
+        }
         // Show a non-interrupting confirmation so the user isn't yanked mid-form.
         Alert.alert(
           'Incoming message',
@@ -172,8 +170,10 @@ export default function RootLayout() {
         // Cold-start: app was not running when user tapped the notification.
         const last = await N.getLastNotificationResponseAsync();
         if (last) {
-          const path = await schedulePathForNotif(
+          const path = await (await import('../src/notifications/scheduler')).routeForDoseNotification(
+            last.notification.request.identifier,
             last.notification.request.content.data as Record<string, unknown>,
+            last.notification.date ? new Date(last.notification.date) : new Date(),
           );
           if (path) _pendingNotifRoute = path;
         }
@@ -183,8 +183,10 @@ export default function RootLayout() {
           async (response) => {
             const notifId = response.notification.request.identifier;
             if (notifId) await N.dismissNotificationAsync(notifId).catch(() => {});
-            const path = await schedulePathForNotif(
+            const path = await (await import('../src/notifications/scheduler')).routeForDoseNotification(
+              response.notification.request.identifier,
               response.notification.request.content.data as Record<string, unknown>,
+              response.notification.date ? new Date(response.notification.date) : new Date(),
             );
             if (path) router.push(path as any);
           },

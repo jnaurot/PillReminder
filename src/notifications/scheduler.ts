@@ -33,6 +33,94 @@ function parseTime(time: string): { hour: number; minute: number } {
   return { hour: h, minute: m };
 }
 
+function focusToken(): string {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function routeForDoseFocus(medId: string, scheduledAt: string | null): string {
+  const params = new URLSearchParams({ medId, focusToken: focusToken() });
+  if (scheduledAt) params.set('scheduledAt', scheduledAt);
+  return `/today?${params.toString()}`;
+}
+
+function inferReminderScheduledAt(identifier: string, medId: string, referenceDate: Date): string | null {
+  const prefix = `rem-${medId}-`;
+  if (!identifier.startsWith(prefix)) return null;
+
+  const slot = identifier.slice(prefix.length);
+  const today = dateToStr(referenceDate);
+
+  // Daily repeating reminder: rem-{medId}-HHmm
+  if (/^\d{4}$/.test(slot)) {
+    return `${today}T${slot.slice(0, 2)}:${slot.slice(2)}:00`;
+  }
+
+  // Weekly repeating reminder: rem-{medId}-{weekday}-HHmm
+  if (/^\d-\d{4}$/.test(slot)) {
+    return `${today}T${slot.slice(2, 4)}:${slot.slice(4)}:00`;
+  }
+
+  // Monthly one-shot reminder: rem-{medId}-YYYY-MM-DD-HHmm
+  const monthly = slot.match(/^(\d{4}-\d{2}-\d{2})-(\d{4})$/);
+  if (monthly) {
+    return `${monthly[1]}T${monthly[2].slice(0, 2)}:${monthly[2].slice(2)}:00`;
+  }
+
+  return null;
+}
+
+async function doseAlreadyCompleted(medId: string, scheduledAt: string | null): Promise<boolean> {
+  if (!scheduledAt) return false;
+  try {
+    const db = getDb();
+    const row = await db.getFirstAsync<{ skipped: number; taken_at: string | null }>(
+      'SELECT skipped, taken_at FROM dose_logs WHERE medication_id = ? AND scheduled_at = ?',
+      [medId, scheduledAt],
+    );
+    return !!row && (row.skipped === 1 || row.taken_at !== null);
+  } catch {
+    return false;
+  }
+}
+
+export async function getNotificationDoseContext(
+  identifier: string,
+  data: Record<string, unknown>,
+  referenceDate = new Date(),
+): Promise<{ medId: string; scheduledAt: string | null } | null> {
+  const medId = typeof data?.medId === 'string' ? data.medId : null;
+  if (!medId) return null;
+
+  const scheduledAt = typeof data?.scheduledAt === 'string'
+    ? data.scheduledAt
+    : inferReminderScheduledAt(identifier, medId, referenceDate);
+
+  return { medId, scheduledAt };
+}
+
+export async function shouldDisplayDoseNotification(
+  identifier: string,
+  data: Record<string, unknown>,
+  referenceDate = new Date(),
+): Promise<boolean> {
+  const type = typeof data?.type === 'string' ? data.type : 'reminder';
+  if (type === 'refill') return true;
+
+  const context = await getNotificationDoseContext(identifier, data, referenceDate);
+  if (!context) return true;
+  return !(await doseAlreadyCompleted(context.medId, context.scheduledAt));
+}
+
+export async function routeForDoseNotification(
+  identifier: string,
+  data: Record<string, unknown>,
+  referenceDate = new Date(),
+): Promise<string | null> {
+  const context = await getNotificationDoseContext(identifier, data, referenceDate);
+  if (!context) return null;
+  return routeForDoseFocus(context.medId, context.scheduledAt);
+}
+
 // ─── Cancel all notifications for a medication ────────────────────────────────
 
 export async function cancelForMedication(medId: string): Promise<void> {
@@ -242,7 +330,15 @@ async function scheduleAlarmForDate(
     : 'dose-alarm-vibrate-v3';
 
   if (Platform.OS === 'android') {
-    scheduleAlarmNative(id, title, body, alarmTime.getTime(), channelId);
+    scheduleAlarmNative(
+      id,
+      title,
+      body,
+      alarmTime.getTime(),
+      channelId,
+      med.id,
+      `${dateStr}T${time}:00`,
+    );
     try {
       await getDb().runAsync(
         'INSERT OR REPLACE INTO native_alarms (alarm_id, med_id) VALUES (?, ?)',
