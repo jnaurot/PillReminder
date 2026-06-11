@@ -4,7 +4,7 @@ import { openDatabaseSync } from 'expo-sqlite';
 import * as FileSystem from 'expo-file-system/legacy';
 import { getOrCreateDbKey } from './cryptoKey';
 
-const SCHEMA_VERSION = 13;
+const SCHEMA_VERSION = 14;
 const ENC_DB_NAME   = 'pillreminder_enc.db';
 const LEGACY_DB_NAME = 'pillreminder.db';
 
@@ -178,7 +178,6 @@ function createSchema(inner: DB): void {
     medication_id TEXT NOT NULL REFERENCES medications(id),
     refill_date   TEXT NOT NULL,
     quantity      INTEGER NOT NULL,
-    days_supply   INTEGER,
     unit          TEXT NOT NULL DEFAULT 'pills',
     created_at    TEXT NOT NULL
   )`);
@@ -252,7 +251,6 @@ function createSchema(inner: DB): void {
     seq INTEGER NOT NULL,
     quantity INTEGER NOT NULL,
     refill_date TEXT NOT NULL,
-    days_supply INTEGER,
     unit TEXT NOT NULL,
     recorded_at TEXT NOT NULL,
     applied_at TEXT NOT NULL
@@ -386,6 +384,14 @@ export async function initDb(): Promise<void> {
   inner.executeSync(`CREATE UNIQUE INDEX IF NOT EXISTS idx_dose_logs_protocol_event_id
     ON dose_logs(protocol_event_id)`);
 
+  const rebuildTable = (table: string, createSql: string, copySql: string) => {
+    inner.executeSync(`DROP TABLE IF EXISTS ${table}_new`);
+    inner.executeSync(createSql.replace(`CREATE TABLE IF NOT EXISTS ${table}`, `CREATE TABLE ${table}_new`));
+    inner.executeSync(copySql);
+    inner.executeSync(`DROP TABLE ${table}`);
+    inner.executeSync(`ALTER TABLE ${table}_new RENAME TO ${table}`);
+  };
+
   // Incremental migrations on existing encrypted DB.
   if (currentVersion > 0) {
     if (currentVersion >= 6 && currentVersion < 9) {
@@ -401,6 +407,49 @@ export async function initDb(): Promise<void> {
       addCol('entities',          'shared_shift_id', 'TEXT');
       addCol('entities',          'primary_phone',   'TEXT');
       addCol('caregiver_shifts',  'primary_phone',   "TEXT NOT NULL DEFAULT ''");
+    }
+
+    if (currentVersion < 14) {
+      inner.executeSync('PRAGMA foreign_keys = OFF');
+      inner.executeSync('BEGIN');
+      try {
+        rebuildTable(
+          'prescriptions',
+          `CREATE TABLE IF NOT EXISTS prescriptions (
+            id            TEXT PRIMARY KEY,
+            medication_id TEXT NOT NULL REFERENCES medications(id),
+            refill_date   TEXT NOT NULL,
+            quantity      INTEGER NOT NULL,
+            unit          TEXT NOT NULL DEFAULT 'pills',
+            created_at    TEXT NOT NULL
+          )`,
+          `INSERT INTO prescriptions_new (id, medication_id, refill_date, quantity, unit, created_at)
+           SELECT id, medication_id, refill_date, quantity, unit, created_at FROM prescriptions`,
+        );
+        rebuildTable(
+          'refill_events',
+          `CREATE TABLE IF NOT EXISTS refill_events (
+            id TEXT PRIMARY KEY,
+            protocol_event_id TEXT NOT NULL UNIQUE,
+            shift_id TEXT NOT NULL,
+            medication_id TEXT NOT NULL,
+            seq INTEGER NOT NULL,
+            quantity INTEGER NOT NULL,
+            refill_date TEXT NOT NULL,
+            unit TEXT NOT NULL,
+            recorded_at TEXT NOT NULL,
+            applied_at TEXT NOT NULL
+          )`,
+          `INSERT INTO refill_events_new (id, protocol_event_id, shift_id, medication_id, seq, quantity, refill_date, unit, recorded_at, applied_at)
+           SELECT id, protocol_event_id, shift_id, medication_id, seq, quantity, refill_date, unit, recorded_at, applied_at FROM refill_events`,
+        );
+        inner.executeSync('COMMIT');
+      } catch (err) {
+        inner.executeSync('ROLLBACK');
+        throw err;
+      } finally {
+        inner.executeSync('PRAGMA foreign_keys = ON');
+      }
     }
 
   }

@@ -3,7 +3,7 @@ import { useLocalSearchParams, router } from 'expo-router';
 import { createMedication } from '../../../../src/db/medications';
 import { logRefill } from '../../../../src/db/prescriptions';
 import { getSettings } from '../../../../src/db/settings';
-import { scheduleForMedication } from '../../../../src/notifications/scheduler';
+import { rescheduleAll, scheduleForMedication } from '../../../../src/notifications/scheduler';
 import { enrichMedication } from '../../../../src/services/rxnorm';
 import MedicationForm, { type MedicationFormData } from '../../../../src/components/MedicationForm';
 
@@ -25,13 +25,13 @@ export default function NewMedicationScreen() {
         await logRefill(
           med.id,
           starting_supply_quantity,
-          null,
           starting_supply_date ?? undefined,
           starting_supply_unit,
         );
       }
       const settings = await getSettings();
       await scheduleForMedication(med, med.missed_window_minutes ?? settings.missed_window_minutes);
+      await rescheduleAll();
       router.back();
       enrichMedication(med.id, med.name, id).catch(() => {});
     } finally {

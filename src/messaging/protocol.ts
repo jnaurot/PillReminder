@@ -133,7 +133,6 @@ export interface RefillEvent {
   medication_id: string;
   refill_date: string;
   quantity: number;
-  days_supply: number | null;
   unit: string;
   recorded_at: string;
 }

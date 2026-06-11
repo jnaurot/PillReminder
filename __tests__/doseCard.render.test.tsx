@@ -16,6 +16,7 @@ jest.mock('../src/db/doseLogs', () => ({
 }));
 jest.mock('../src/notifications/scheduler', () => ({
   cancelDoseNotifications: jest.fn(),
+  rescheduleAll: jest.fn(),
 }));
 jest.mock('../src/messaging/transport', () => ({
   defaultTransport: { send: jest.fn() },

@@ -127,10 +127,10 @@ async function handleDoseUpdate(msg: MsgDoseUpdate): Promise<HandlerResult> {
 async function handleRefillUpdate(msg: MsgRefillUpdate): Promise<HandlerResult> {
   await getDb().runAsync(
     `INSERT OR IGNORE INTO prescriptions
-       (id, medication_id, refill_date, quantity, days_supply, unit, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+       (id, medication_id, refill_date, quantity, unit, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
     [uuidv4(), msg.medicationId, msg.refillDate, msg.quantity,
-     msg.daysSupply, msg.unit, now()],
+     msg.unit, now()],
   );
   return { ok: true, action: 'refill_updated' };
 }

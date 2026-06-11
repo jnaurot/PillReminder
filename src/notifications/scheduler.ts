@@ -1,5 +1,6 @@
 import Constants from 'expo-constants';
 import { getDb } from '../db/database';
+import { getRefillStatus } from '../db/prescriptions';
 import { getSettings } from '../db/settings';
 import { parseSchedule } from '../types';
 import type { Medication } from '../types';
@@ -148,24 +149,34 @@ export async function cancelRefillAlert(medId: string): Promise<void> {
 export async function scheduleRefillAlert(
   medId: string,
   medName: string,
-  refillDate: string,
-  daysSupply: number,
+  unitsRemaining: number,
+  dailyUnitsTaken: number,
+  unit: string,
   alertDays: number,
 ): Promise<void> {
   const N = await getN();
   if (!N) return;
   await cancelRefillAlert(medId);
 
-  const fireDate = new Date(`${refillDate}T09:00:00`);
-  fireDate.setDate(fireDate.getDate() + daysSupply - alertDays);
-  if (fireDate <= new Date()) return;
+  if (!(dailyUnitsTaken > 0)) return;
+
+  const thresholdUnits = dailyUnitsTaken * alertDays;
+  let fireDate = new Date();
+  if (unitsRemaining > thresholdUnits) {
+    const daysUntilThreshold = (unitsRemaining - thresholdUnits) / dailyUnitsTaken;
+    const msUntilThreshold = daysUntilThreshold * 86400000;
+    fireDate = new Date(Date.now() + msUntilThreshold);
+    fireDate.setHours(9, 0, 0, 0);
+  } else {
+    fireDate = new Date(Date.now() + 60_000);
+  }
 
   try {
     await N.scheduleNotificationAsync({
       identifier: refillId(medId),
       content: {
         title: `Refill needed: ${medName}`,
-        body: `About ${alertDays} day${alertDays !== 1 ? 's' : ''} of supply remaining.`,
+        body: `Estimated supply is at or near ${Math.ceil(thresholdUnits)} ${unit}.`,
         sound: true,
         data: { medId, type: 'refill' },
       },
@@ -370,13 +381,16 @@ export async function rescheduleAll(): Promise<void> {
     const meds = await db.getAllAsync<Medication>('SELECT * FROM medications WHERE deleted_at IS NULL');
     const settings = await getSettings();
     for (const med of meds) {
-      const rx = await db.getFirstAsync<{ refill_date: string; days_supply: number | null }>(
-        `SELECT refill_date, days_supply FROM prescriptions
-         WHERE medication_id = ? ORDER BY refill_date DESC LIMIT 1`,
-        [med.id],
-      );
-      if (rx?.days_supply) {
-        await scheduleRefillAlert(med.id, med.name, rx.refill_date, rx.days_supply, settings.refill_alert_days);
+      const status = await getRefillStatus(med.id, settings.refill_alert_days);
+      if (status?.dailyUnitsTaken && status.unitsRemaining !== null) {
+        await scheduleRefillAlert(
+          med.id,
+          med.name,
+          status.unitsRemaining,
+          status.dailyUnitsTaken,
+          status.prescription.unit,
+          settings.refill_alert_days,
+        );
       }
     }
   } catch {}

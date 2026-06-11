@@ -17,13 +17,12 @@ class FakeDb {
     const norm = sql.replace(/\s+/g, ' ').trim();
 
     if (norm.startsWith('INSERT INTO prescriptions')) {
-      const [id, medication_id, refill_date, quantity, days_supply, unit, created_at] = params;
+      const [id, medication_id, refill_date, quantity, unit, created_at] = params;
       this.prescriptions.push({
         id,
         medication_id,
         refill_date,
         quantity,
-        days_supply,
         unit,
         created_at,
       });
@@ -68,7 +67,7 @@ class FakeDb {
       return { total } as T;
     }
 
-    if (norm.startsWith('SELECT pills_per_dose FROM medications WHERE id = ?')) {
+    if (norm.startsWith('SELECT pills_per_dose, schedule FROM medications WHERE id = ?')) {
       const medicationId = params[0] as string;
       return (this.medications.get(medicationId) ?? null) as T | null;
     }
@@ -82,12 +81,15 @@ describe('refill status integration', () => {
 
   beforeEach(() => {
     fakeDb = new FakeDb();
-    fakeDb.medications.set('med-1', { pills_per_dose: 1 });
+    fakeDb.medications.set('med-1', {
+      pills_per_dose: 1,
+      schedule: '{"type":"fixed_times","times":["08:00"]}',
+    });
     (getDb as jest.Mock).mockReturnValue(fakeDb);
   });
 
   it('adds refill quantities to current supply instead of resetting to the latest refill quantity', async () => {
-    await logRefill('med-1', 24, null, '2026-06-01', 'pills');
+    await logRefill('med-1', 24, '2026-06-01', 'pills');
     fakeDb.doseLogs.push(
       {
         medication_id: 'med-1',
@@ -106,7 +108,7 @@ describe('refill status integration', () => {
       },
     );
 
-    await logRefill('med-1', 90, null, '2026-06-05', 'pills');
+    await logRefill('med-1', 90, '2026-06-05', 'pills');
 
     const status = await getRefillStatus('med-1', 7);
 

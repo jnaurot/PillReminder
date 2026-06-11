@@ -10,7 +10,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { getMedication } from '../../../../../src/db/medications';
 import { logRefill, getPrescriptions, deleteRefill, type Prescription } from '../../../../../src/db/prescriptions';
 import { todayStr } from '../../../../../src/db/doseLogs';
-import { getSettings } from '../../../../../src/db/settings';
 import { getDb } from '../../../../../src/db/database';
 import { defaultTransport } from '../../../../../src/messaging/transport';
 import {
@@ -21,22 +20,18 @@ import {
 } from '../../../../../src/messaging/secureProtocol';
 import {
   buildRefillHumanText,
-  computeSuggestedDays,
   shouldOfferPrimaryRefillUpdate,
 } from '../../../../../src/screens/criticalFlows';
 import DateInput from '../../../../../src/components/DateInput';
-import type { Medication } from '../../../../../src/types';
-import { scheduleRefillAlert } from '../../../../../src/notifications/scheduler';
+import { cancelRefillAlert, rescheduleAll } from '../../../../../src/notifications/scheduler';
 
 const UNITS = ['pills', 'capsules', 'mL', 'mg', 'patches', 'injections', 'puffs', 'drops', 'tablets'];
 
 export default function RefillScreen() {
   const { id, medId } = useLocalSearchParams<{ id: string; medId: string }>();
-  const [medication, setMedication] = useState<Medication | null>(null);
+  const [medication, setMedication] = useState<any | null>(null);
   const [history, setHistory] = useState<Prescription[]>([]);
   const [quantity, setQuantity] = useState('');
-  const [daysSupply, setDaysSupply] = useState('');
-  const [daysSupplyLocked, setDaysSupplyLocked] = useState(false);
   const [refillDate, setRefillDate] = useState(todayStr());
   const [unit, setUnit] = useState('pills');
   const [saving, setSaving] = useState(false);
@@ -51,16 +46,6 @@ export default function RefillScreen() {
   useEffect(() => {
     reload().then(() => setLoading(false));
   }, [medId]);
-
-  // Auto-update days supply when quantity changes (unless user has manually edited it)
-  useEffect(() => {
-    if (daysSupplyLocked || !medication) return;
-    const suggested = computeSuggestedDays(medication, quantity);
-    setDaysSupply(suggested !== null ? String(suggested) : '');
-  }, [quantity, medication, daysSupplyLocked]);
-
-  const suggestedDays = medication ? computeSuggestedDays(medication, quantity) : null;
-  const showResetToAuto = daysSupplyLocked && suggestedDays !== null;
   const isInitialSupply = history.length === 0;
 
   async function handleSave() {
@@ -71,11 +56,6 @@ export default function RefillScreen() {
       Alert.alert('Quantity required', 'Enter a valid quantity.');
       return;
     }
-    const ds = daysSupply.trim() ? parseInt(daysSupply, 10) : null;
-    if (daysSupply.trim() && (isNaN(ds!) || ds! < 1)) {
-      Alert.alert('Invalid days supply', 'Enter a positive number or leave blank.');
-      return;
-    }
     if (refillDate.length > 0 && !/^\d{4}-\d{2}-\d{2}$/.test(refillDate)) {
       Alert.alert('Invalid date', 'Enter the refill date as YYYY-MM-DD.');
       return;
@@ -83,14 +63,10 @@ export default function RefillScreen() {
 
     setSaving(true);
     try {
-      await logRefill(medId, qty, ds, refillDate || undefined, unit);
-      if (ds && medication) {
-        const settings = await getSettings();
-        await scheduleRefillAlert(medId, medication.name, refillDate || todayStr(), ds, settings.refill_alert_days);
-      }
+      await logRefill(medId, qty, refillDate || undefined, unit);
+      await cancelRefillAlert(medId);
+      await rescheduleAll();
       setQuantity('');
-      setDaysSupply('');
-      setDaysSupplyLocked(false);
       setRefillDate(todayStr());
       await reload();
 
@@ -129,7 +105,6 @@ export default function RefillScreen() {
                         medication_id: medId,
                         refill_date: refillDate || todayStr(),
                         quantity: qty,
-                        days_supply: ds ?? null,
                         unit,
                         recorded_at: recordedAt,
                       }],
@@ -137,7 +112,7 @@ export default function RefillScreen() {
                     });
                     await defaultTransport.send({
                       phone: primaryPhone,
-                      humanText: buildRefillHumanText(medication.name, qty, unit, ds ?? null),
+                      humanText: buildRefillHumanText(medication.name, qty, unit),
                       msg: envelope,
                     });
                     await recordOutgoingRefillProtocolEvent({
@@ -147,7 +122,6 @@ export default function RefillScreen() {
                       seq,
                       quantity: qty,
                       refillDate: refillDate || todayStr(),
-                      daysSupply: ds ?? null,
                       unit,
                       recordedAt,
                     });
@@ -178,6 +152,8 @@ export default function RefillScreen() {
           style: 'destructive',
           onPress: async () => {
             await deleteRefill(rx.id);
+            await cancelRefillAlert(medId);
+            await rescheduleAll();
             await reload();
           },
         },
@@ -221,7 +197,7 @@ export default function RefillScreen() {
             <Text style={styles.introText}>
               {isInitialSupply
                 ? 'Record how much medication is currently on hand. Refill tracking stays unknown until supply is entered.'
-                : 'Add the latest amount received. The app uses this supply history to estimate what remains.'}
+                : 'Add the latest amount received. The app uses cumulative supply history and taken doses to estimate what remains.'}
             </Text>
           </View>
           <View style={styles.field}>
@@ -263,46 +239,6 @@ export default function RefillScreen() {
             </View>
           </View>
 
-          <View style={styles.field}>
-            <View style={styles.labelRow}>
-              <Text style={styles.label}>Days Supply</Text>
-              {!daysSupplyLocked && daysSupply !== '' && (
-                <View style={styles.autoChip}>
-                  <Text style={styles.autoChipText}>auto</Text>
-                </View>
-              )}
-            </View>
-            <Text style={styles.hint}>
-              {!daysSupplyLocked && daysSupply !== ''
-                ? 'Calculated from schedule and quantity — edit to override.'
-                : 'Optional — used to estimate when you\'ll run out.'}
-            </Text>
-            <View style={styles.row}>
-              <TextInput
-                style={[styles.input, { flex: 1 }]}
-                value={daysSupply}
-                onChangeText={(t) => {
-                  setDaysSupplyLocked(true);
-                  setDaysSupply(t);
-                }}
-                keyboardType="numeric"
-                placeholder={suggestedDays !== null ? `e.g. ${suggestedDays}` : 'e.g. 30'}
-                placeholderTextColor="#CBD5E1"
-                returnKeyType="done"
-                onSubmitEditing={handleSave}
-              />
-              <View style={styles.unitBadge}><Text style={styles.unitBadgeText}>days</Text></View>
-            </View>
-            {showResetToAuto && (
-              <TouchableOpacity
-                onPress={() => setDaysSupplyLocked(false)}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              >
-                <Text style={styles.autoReset}>↺ Use auto-calculated ({suggestedDays}d)</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-
           {history.length > 0 && (
             <View style={styles.historySection}>
               <Text style={styles.historyTitle}>Refill History</Text>
@@ -317,7 +253,7 @@ export default function RefillScreen() {
                 >
                   <Text style={styles.historyDate}>{rx.refill_date}</Text>
                   <Text style={styles.historyDetail}>
-                    {rx.quantity} {rx.unit}{rx.days_supply ? `  ·  ${rx.days_supply}d supply` : ''}
+                    {rx.quantity} {rx.unit}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -353,14 +289,7 @@ const styles = StyleSheet.create({
   saveDisabled: { opacity: 0.4 },
   form: { padding: 20, gap: 20 },
   field: { gap: 6 },
-  labelRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   label: { fontSize: 13, fontWeight: '600', color: '#475569', textTransform: 'uppercase', letterSpacing: 0.5 },
-  autoChip: {
-    backgroundColor: '#DBEAFE', borderRadius: 8,
-    paddingHorizontal: 7, paddingVertical: 2,
-  },
-  autoChipText: { fontSize: 10, fontWeight: '700', color: '#2563EB', textTransform: 'uppercase', letterSpacing: 0.5 },
-  autoReset: { fontSize: 12, color: '#4A90D9', fontWeight: '500', marginTop: 2 },
   hint: { fontSize: 12, color: '#94A3B8' },
   row: { flexDirection: 'row', alignItems: 'center' },
   input: {

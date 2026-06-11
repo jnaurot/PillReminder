@@ -143,8 +143,8 @@ class FakeDb {
     }
 
     if (norm.startsWith('INSERT INTO prescriptions')) {
-      const [id, medication_id, refill_date, quantity, days_supply, unit, created_at] = params;
-      this.insertedPrescriptions.push({ id, medication_id, refill_date, quantity, days_supply, unit, created_at });
+      const [id, medication_id, refill_date, quantity, unit, created_at] = params;
+      this.insertedPrescriptions.push({ id, medication_id, refill_date, quantity, unit, created_at });
       return { changes: 1, lastInsertRowId: 0 };
     }
 
@@ -270,7 +270,6 @@ describe('backup db integration', () => {
             medication_id: 'med-1',
             refill_date: '2026-06-01',
             quantity: 90,
-            days_supply: 45,
             unit: 'pills',
             created_at: '2026-06-01T00:00:00.000Z',
           },

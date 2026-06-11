@@ -825,14 +825,13 @@ export async function recordOutgoingRefillProtocolEvent(args: {
   seq: number;
   quantity: number;
   refillDate: string;
-  daysSupply: number | null;
   unit: string;
   recordedAt: string;
 }): Promise<void> {
   await getDb().runAsync(
     `INSERT INTO refill_events
-       (id, protocol_event_id, shift_id, medication_id, seq, quantity, refill_date, days_supply, unit, recorded_at, applied_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, protocol_event_id, shift_id, medication_id, seq, quantity, refill_date, unit, recorded_at, applied_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       uuidv4(),
       args.eventId,
@@ -841,7 +840,6 @@ export async function recordOutgoingRefillProtocolEvent(args: {
       args.seq,
       args.quantity,
       args.refillDate,
-      args.daysSupply,
       args.unit,
       args.recordedAt,
       now(),
@@ -1047,14 +1045,14 @@ export async function processProtocolEnvelope(envelope: ProtocolEnvelope): Promi
         if (event.seq <= shift.last_applied_seq) throw new Error('Refill event sequence replayed.');
         await db.runAsync(
           `INSERT INTO refill_events
-             (id, protocol_event_id, shift_id, medication_id, seq, quantity, refill_date, days_supply, unit, recorded_at, applied_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [uuidv4(), event.event_id, payload.shift_id, event.medication_id, event.seq, event.quantity, event.refill_date, event.days_supply, event.unit, event.recorded_at, now()],
+             (id, protocol_event_id, shift_id, medication_id, seq, quantity, refill_date, unit, recorded_at, applied_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [uuidv4(), event.event_id, payload.shift_id, event.medication_id, event.seq, event.quantity, event.refill_date, event.unit, event.recorded_at, now()],
         );
         await db.runAsync(
-          `INSERT INTO prescriptions (id, medication_id, refill_date, quantity, days_supply, unit, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [uuidv4(), event.medication_id, event.refill_date, event.quantity, event.days_supply, event.unit, event.recorded_at],
+          `INSERT INTO prescriptions (id, medication_id, refill_date, quantity, unit, created_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [uuidv4(), event.medication_id, event.refill_date, event.quantity, event.unit, event.recorded_at],
         );
         await db.runAsync(
           `INSERT INTO protocol_event_receipts (protocol_event_id, shift_id, seq, received_at, applied_at, status)

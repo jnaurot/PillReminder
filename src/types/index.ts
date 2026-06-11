@@ -118,6 +118,7 @@ export interface Prescription {
   medication_id: string;
   refill_date: string;
   quantity: number;
+  unit: string;
   created_at: string;
 }
 

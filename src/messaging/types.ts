@@ -82,7 +82,6 @@ export interface MsgRefillUpdate {
   medicationId: string;
   quantity: number;
   refillDate: string;
-  daysSupply: number | null;
   unit: string;
 }
 

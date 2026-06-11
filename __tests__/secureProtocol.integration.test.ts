@@ -291,8 +291,8 @@ class FakeDb {
     }
 
     if (norm.startsWith('INSERT INTO refill_events')) {
-      const [id, protocol_event_id, shift_id, medication_id, seq, quantity, refill_date, days_supply, unit, recorded_at, applied_at] = params;
-      this.refillEvents.set(id as string, { id, protocol_event_id, shift_id, medication_id, seq, quantity, refill_date, days_supply, unit, recorded_at, applied_at });
+      const [id, protocol_event_id, shift_id, medication_id, seq, quantity, refill_date, unit, recorded_at, applied_at] = params;
+      this.refillEvents.set(id as string, { id, protocol_event_id, shift_id, medication_id, seq, quantity, refill_date, unit, recorded_at, applied_at });
       return { changes: 1, lastInsertRowId: 0 };
     }
 

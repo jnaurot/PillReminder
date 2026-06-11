@@ -1,32 +1,7 @@
 import type { ShiftWithCaregiver } from '../db/caregivers';
 import type { EntityDoses, ScheduledDose } from '../db/doseLogs';
-import type { Medication, Entity } from '../types';
+import type { Entity } from '../types';
 import type { Prescription, RefillStatus } from '../db/prescriptions';
-import { parseSchedule } from '../types';
-
-export function computeSuggestedDays(med: Medication, quantityStr: string): number | null {
-  const qty = parseInt(quantityStr, 10);
-  if (Number.isNaN(qty) || qty < 1) return null;
-
-  const schedule = parseSchedule(med.schedule);
-  let dosesPerDay: number;
-  switch (schedule.type) {
-    case 'fixed_times':
-      dosesPerDay = schedule.times.length;
-      break;
-    case 'weekly':
-      dosesPerDay = (schedule.days.length * schedule.times.length) / 7;
-      break;
-    case 'monthly':
-      dosesPerDay = (schedule.days.length * schedule.times.length) / 30;
-      break;
-    default:
-      return null;
-  }
-
-  if (dosesPerDay <= 0) return null;
-  return Math.round(qty / (med.pills_per_dose * dosesPerDay));
-}
 
 export function shouldOfferPrimaryRefillUpdate(entityRow: {
   shift_source: string;
@@ -48,9 +23,8 @@ export function buildRefillHumanText(
   medicationName: string,
   quantity: number,
   unit: string,
-  daysSupply: number | null,
 ): string {
-  return `Refill logged: ${medicationName} — ${quantity} ${unit}${daysSupply ? `, ${daysSupply}d supply` : ''}.`;
+  return `Refill logged: ${medicationName} — ${quantity} ${unit}.`;
 }
 
 export function buildDelegatedEntityIds(

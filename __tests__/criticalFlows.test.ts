@@ -4,7 +4,6 @@ import {
   buildDelegatedEntityIds,
   buildParsedDeepLinkPath,
   buildRefillHumanText,
-  computeSuggestedDays,
   entityLabelForShift,
   getShiftEntityIds,
   getShiftStatusPresentation,
@@ -38,16 +37,6 @@ describe('critical screen flows', () => {
     pill_appearance: null,
   };
 
-  it('computes refill day suggestions for fixed schedules and declines unsupported PRN schedules', () => {
-    expect(computeSuggestedDays(medication as any, '60')).toBe(15);
-    expect(
-      computeSuggestedDays(
-        { ...medication, schedule: '{"type":"prn","max_doses_per_day":2}' } as any,
-        '60',
-      ),
-    ).toBeNull();
-  });
-
   it('only offers a primary refill update for shared entities with both phone and shift context', () => {
     expect(shouldOfferPrimaryRefillUpdate({
       shift_source: 'shared',
@@ -64,8 +53,8 @@ describe('critical screen flows', () => {
       shared_shift_id: null,
       primary_phone: '5550001111',
     })).toBe(false);
-    expect(buildRefillHumanText('Metformin', 90, 'pills', 45)).toContain('45d supply');
-    expect(buildRefillHumanText('Metformin', 30, 'pills', null)).not.toContain('supply');
+    expect(buildRefillHumanText('Metformin', 90, 'pills')).toBe('Refill logged: Metformin — 90 pills.');
+    expect(buildRefillHumanText('Metformin', 30, 'pills')).not.toContain('supply');
   });
 
   it('finds the exact dose card to focus and summarizes today counts by status', () => {

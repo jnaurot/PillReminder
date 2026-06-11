@@ -238,10 +238,10 @@ export async function importBackup(uri: string, password: string): Promise<Impor
 
     for (const r of (backup.prescriptions ?? []) as any[]) {
       await db.runAsync(
-        `INSERT INTO prescriptions (id, medication_id, refill_date, quantity, days_supply, unit, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO prescriptions (id, medication_id, refill_date, quantity, unit, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
         [r.id, r.medication_id, r.refill_date, r.quantity,
-         r.days_supply ?? null, r.unit ?? 'pills', r.created_at],
+         r.unit ?? 'pills', r.created_at],
       );
     }
 

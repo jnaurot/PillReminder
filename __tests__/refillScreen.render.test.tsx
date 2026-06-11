@@ -39,7 +39,8 @@ jest.mock('../src/components/DateInput', () => {
   return ({ value }: any) => React.createElement('Text', {}, `DateInput:${value}`);
 });
 jest.mock('../src/notifications/scheduler', () => ({
-  scheduleRefillAlert: jest.fn(),
+  cancelRefillAlert: jest.fn(),
+  rescheduleAll: jest.fn(),
 }));
 jest.mock('expo-crypto', () => ({
   randomUUID: jest.fn(() => 'uuid-1'),
@@ -75,7 +76,7 @@ describe('Refill screen render behavior', () => {
     (getMedication as jest.Mock).mockResolvedValue(medication);
   });
 
-  it('renders the starting supply state and auto-calculates days supply from quantity', async () => {
+  it('renders the starting supply state without a manual days supply field', async () => {
     (getPrescriptions as jest.Mock).mockResolvedValue([]);
 
     let tree!: TestRenderer.ReactTestRenderer;
@@ -86,16 +87,7 @@ describe('Refill screen render behavior', () => {
 
     expect(findTextNode(tree.root, 'Supply — Metformin')).toBeTruthy();
     expect(findTextNode(tree.root, 'Starting Supply')).toBeTruthy();
-
-    const inputs = tree.root.findAllByType('TextInput' as any);
-    await act(async () => {
-      inputs[0].props.onChangeText('60');
-      await flushEffects();
-    });
-
-    const updatedInputs = tree.root.findAllByType('TextInput' as any);
-    expect(updatedInputs[1].props.value).toBe('15');
-    expect(findTextNode(tree.root, 'auto')).toBeTruthy();
+    expect(tree.root.findAll((node) => (node.type as any) === 'Text' && String(node.props.children).includes('Days Supply')).length).toBe(0);
   });
 
   it('renders refill history and confirms removal on long press', async () => {
@@ -105,7 +97,6 @@ describe('Refill screen render behavior', () => {
         refill_date: '2026-06-01',
         quantity: 90,
         unit: 'pills',
-        days_supply: 45,
       },
     ]);
 
@@ -118,7 +109,7 @@ describe('Refill screen render behavior', () => {
     expect(findTextNode(tree.root, 'Refill — Metformin')).toBeTruthy();
     expect(findTextNode(tree.root, 'Refill History')).toBeTruthy();
     expect(findTextNode(tree.root, '2026-06-01')).toBeTruthy();
-    expect(findTextNode(tree.root, '90 pills  ·  45d supply')).toBeTruthy();
+    expect(findTextNode(tree.root, '90 pills')).toBeTruthy();
 
     const historyRows = tree.root.findAllByType('TouchableOpacity' as any).filter((node) => typeof node.props.onLongPress === 'function');
     await act(async () => {

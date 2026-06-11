@@ -1,5 +1,7 @@
 import * as Crypto from 'expo-crypto';
 import { getDb } from './database';
+import { parseSchedule } from '../types';
+import type { MedicationSchedule } from '../types';
 
 const uuidv4 = () => Crypto.randomUUID();
 
@@ -12,7 +14,6 @@ export interface Prescription {
   medication_id: string;
   refill_date: string;
   quantity: number;
-  days_supply: number | null;
   unit: string;
   created_at: string;
 }
@@ -21,13 +22,13 @@ export interface RefillStatus {
   prescription: Prescription;
   daysRemaining: number | null;
   unitsRemaining: number | null;
+  dailyUnitsTaken: number | null;
   isLow: boolean;
 }
 
 export async function logRefill(
   medicationId: string,
   quantity: number,
-  daysSupply: number | null,
   refillDate?: string,
   unit: string = 'pills',
 ): Promise<Prescription> {
@@ -37,16 +38,37 @@ export async function logRefill(
     medication_id: medicationId,
     refill_date: refillDate ?? now().slice(0, 10),
     quantity,
-    days_supply: daysSupply,
     unit,
     created_at: now(),
   };
   await db.runAsync(
-    `INSERT INTO prescriptions (id, medication_id, refill_date, quantity, days_supply, unit, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [rx.id, rx.medication_id, rx.refill_date, rx.quantity, rx.days_supply, rx.unit, rx.created_at]
+    `INSERT INTO prescriptions (id, medication_id, refill_date, quantity, unit, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [rx.id, rx.medication_id, rx.refill_date, rx.quantity, rx.unit, rx.created_at]
   );
   return rx;
+}
+
+export function getDailyUnitsTaken(args: {
+  pillsPerDose: number;
+  schedule: string;
+}): number | null {
+  const schedule: MedicationSchedule = parseSchedule(args.schedule);
+  switch (schedule.type) {
+    case 'fixed_times':
+      return schedule.times.length > 0 ? args.pillsPerDose * schedule.times.length : null;
+    case 'weekly':
+      return schedule.times.length > 0 && schedule.days.length > 0
+        ? (args.pillsPerDose * schedule.times.length * schedule.days.length) / 7
+        : null;
+    case 'monthly':
+      return schedule.times.length > 0 && schedule.days.length > 0
+        ? (args.pillsPerDose * schedule.times.length * schedule.days.length) / 30
+        : null;
+    case 'prn':
+    default:
+      return null;
+  }
 }
 
 export async function getPrescriptions(medicationId: string): Promise<Prescription[]> {
@@ -93,27 +115,37 @@ export async function getRefillStatus(
   );
   const dosesTaken = row?.total ?? 0;
 
-  const med = await db.getFirstAsync<{ pills_per_dose: number }>(
-    `SELECT pills_per_dose FROM medications WHERE id = ?`,
+  const med = await db.getFirstAsync<{ pills_per_dose: number; schedule: string }>(
+    `SELECT pills_per_dose, schedule FROM medications WHERE id = ?`,
     [medicationId]
   );
   const unitsPerDose = med?.pills_per_dose ?? 1;
   const unitsTaken = dosesTaken * unitsPerDose;
   const unitsRemaining = Math.max(0, totalUnitsSupplied - unitsTaken);
+  const dailyUnitsTaken = med
+    ? getDailyUnitsTaken({
+        pillsPerDose: med.pills_per_dose ?? 1,
+        schedule: (med as any).schedule,
+      })
+    : null;
 
   let daysRemaining: number | null = null;
-  if (rx.days_supply !== null) {
-    const refillMs = new Date(rx.refill_date).getTime();
-    const emptyMs = refillMs + rx.days_supply * 86400000;
-    daysRemaining = Math.ceil((emptyMs - Date.now()) / 86400000);
+  if (dailyUnitsTaken !== null && dailyUnitsTaken > 0) {
+    daysRemaining = Math.ceil(unitsRemaining / dailyUnitsTaken);
   }
+
+  const lowSupplyThresholdUnits = dailyUnitsTaken !== null
+    ? dailyUnitsTaken * alertDays
+    : null;
 
   return {
     prescription: rx,
     daysRemaining,
     unitsRemaining,
+    dailyUnitsTaken,
     isLow:
-      (daysRemaining !== null && daysRemaining <= alertDays) ||
-      (daysRemaining === null && unitsRemaining <= alertDays * unitsPerDose),
+      lowSupplyThresholdUnits !== null
+        ? unitsRemaining <= lowSupplyThresholdUnits
+        : false,
   };
 }

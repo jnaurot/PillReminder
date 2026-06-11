@@ -15,6 +15,7 @@ import { parseSchedule, parseInteractions } from '../types/index';
 import type { MedicationInteraction } from '../types/index';
 import {
   cancelDoseNotifications,
+  rescheduleAll,
 } from '../notifications/scheduler';
 import { defaultTransport } from '../messaging/transport';
 import {
@@ -249,6 +250,7 @@ export function DoseCard({
           style: 'destructive',
           onPress: async () => {
             if (dose.log) await deleteLog(dose.log.id);
+            await rescheduleAll();
             onAction();
           },
         },
@@ -292,6 +294,7 @@ export function DoseCard({
 
   async function executeTakePrn(note: string) {
     const logs = await logDoseTaken(dose.medication.id, null, undefined, note || undefined);
+    await rescheduleAll();
     await maybeSendDoseEvents(logs.map((log) => ({
       log,
       eventType: 'dose_taken' as const,
@@ -376,6 +379,7 @@ export function DoseCard({
               if (dose.scheduledAt) {
                 await cancelDoseNotifications(dose.medication.id, dose.scheduledAt);
               }
+      await rescheduleAll();
       await maybeSendDoseEvents(logs.map((log) => ({
         log,
         eventType: 'dose_taken' as const,
@@ -405,6 +409,7 @@ export function DoseCard({
               if (missedDose.scheduledAt) {
                 await cancelDoseNotifications(dose.medication.id, missedDose.scheduledAt);
               }
+              await rescheduleAll();
               await maybeSendDoseEvents(logs.map((log) => ({
                 log,
                 eventType: log.is_catchup ? 'dose_catchup' as const : 'dose_taken' as const,
@@ -435,6 +440,7 @@ export function DoseCard({
               if (missedDose.scheduledAt) {
                 await cancelDoseNotifications(dose.medication.id, missedDose.scheduledAt);
               }
+              await rescheduleAll();
               await maybeSendDoseEvents([
                 ...skippedLogs.map((log) => ({
                   log,
@@ -467,6 +473,7 @@ export function DoseCard({
           onPress: async () => {
             const logs = await logDoseSkipped(dose.medication.id, dose.scheduledAt!);
             await cancelDoseNotifications(dose.medication.id, dose.scheduledAt!);
+            await rescheduleAll();
             await maybeSendDoseEvents(logs.map((log) => ({
               log,
               eventType: 'dose_skipped' as const,
@@ -581,7 +588,7 @@ export function DoseCard({
                       {
                         text: 'Undo',
                         style: 'destructive',
-                        onPress: async () => { await deleteLog(log.id); onAction(); },
+                        onPress: async () => { await deleteLog(log.id); await rescheduleAll(); onAction(); },
                       },
                       { text: 'Cancel', style: 'cancel' },
                     ]);
