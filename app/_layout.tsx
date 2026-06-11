@@ -1,58 +1,33 @@
 import { useEffect, useRef, useState } from 'react';
 import { Stack, router } from 'expo-router';
-import { Alert, AppState, View, ActivityIndicator, Vibration } from 'react-native';
+import { Alert, AppState, View, ActivityIndicator } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as Linking from 'expo-linking';
 import Constants from 'expo-constants';
 import { initDb } from '../src/db/database';
 import { getSettings } from '../src/db/settings';
 import { setFlagSecure } from '../src/native/flagSecure';
-import '../src/notifications/backgroundTask';
+import { buildParsedDeepLinkPath } from '../src/screens/criticalFlows';
 
 const isExpoGo = Constants.executionEnvironment === 'storeClient';
 
 async function initNotifications() {
   if (isExpoGo) return;
-  const { setNotificationHandler, addNotificationReceivedListener } = await import('expo-notifications');
-  const Notifications = await import('expo-notifications');
+  const { setNotificationHandler } = await import('expo-notifications');
   const { requestNotificationPermissions } = await import('../src/notifications/permissions');
-  const { ALARM_VIBRATION_TASK } = await import('../src/notifications/backgroundTask');
-  const {
-    dismissScheduledReminderForDose,
-    rescheduleAll,
-    shouldDisplayDoseNotification,
-  } = await import('../src/notifications/scheduler');
+  const { rescheduleAll } = await import('../src/notifications/scheduler');
 
   setNotificationHandler({
-    handleNotification: async (notification) => {
-      const shouldShow = await shouldDisplayDoseNotification(
-        notification.request.identifier,
-        (notification.request.content.data ?? {}) as Record<string, unknown>,
-        notification.date ? new Date(notification.date) : new Date(),
-      );
-      return {
-        shouldShowBanner: shouldShow,
-        shouldShowList: shouldShow,
-        shouldPlaySound: shouldShow,
-        shouldSetBadge: false,
-      };
-    },
-  });
-
-  // Foreground: vibrate directly when an alarm notification arrives.
-  addNotificationReceivedListener((notification) => {
-    const data = notification.request.content.data as any;
-    const type = data?.type;
-    if (type === 'alarm') {
-      Vibration.vibrate([0, 5000]);
-    } else if (type === 'missed' && typeof data?.medId === 'string' && typeof data?.scheduledAt === 'string') {
-      dismissScheduledReminderForDose(data.medId, data.scheduledAt).catch(() => {});
-    }
+    handleNotification: async () => ({
+      shouldShowBanner: true,
+      shouldShowList: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+    }),
   });
 
   const granted = await requestNotificationPermissions();
   if (!granted) return;
-  await Notifications.registerTaskAsync(ALARM_VIBRATION_TASK).catch(() => {});
   await rescheduleAll();
 }
 
@@ -81,14 +56,7 @@ export function consumePendingDeepLink(): string | null {
 function extractDeepLinkPath(url: string): string | null {
   try {
     const parsed = Linking.parse(url);
-    // parsed.path is e.g. "caregivers/incoming", params includes { d: '...' }
-    if (!parsed.path) return null;
-    const qs = parsed.queryParams
-      ? Object.entries(parsed.queryParams)
-          .map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`)
-          .join('&')
-      : '';
-    return qs ? `/${parsed.path}?${qs}` : `/${parsed.path}`;
+    return buildParsedDeepLinkPath(parsed);
   } catch {
     return null;
   }
@@ -117,11 +85,15 @@ export default function RootLayout() {
         backgroundedAtRef.current = null;
         if (!appReadyRef.current || since === null) return;
         const elapsed = Date.now() - since;
-        getSettings().then((s) => {
+        getSettings().then(async (s) => {
           if (s.inactivity_timeout_minutes > 0 && elapsed >= s.inactivity_timeout_minutes * 60_000) {
             appReadyRef.current = false;
             router.replace('/');
+            return;
           }
+          await import('../src/notifications/scheduler').then(({ rebuildNotificationPool }) =>
+            rebuildNotificationPool().catch(() => {})
+          );
         }).catch(() => {});
       }
     });
@@ -173,7 +145,6 @@ export default function RootLayout() {
           const path = await (await import('../src/notifications/scheduler')).routeForDoseNotification(
             last.notification.request.identifier,
             last.notification.request.content.data as Record<string, unknown>,
-            last.notification.date ? new Date(last.notification.date) : new Date(),
           );
           if (path) _pendingNotifRoute = path;
         }
@@ -186,7 +157,6 @@ export default function RootLayout() {
             const path = await (await import('../src/notifications/scheduler')).routeForDoseNotification(
               response.notification.request.identifier,
               response.notification.request.content.data as Record<string, unknown>,
-              response.notification.date ? new Date(response.notification.date) : new Date(),
             );
             if (path) router.push(path as any);
           },

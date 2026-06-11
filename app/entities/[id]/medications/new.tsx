@@ -31,10 +31,7 @@ export default function NewMedicationScreen() {
         );
       }
       const settings = await getSettings();
-      const alarm = settings.alarm_enabled
-        ? { delayMin: settings.alarm_delay_minutes, type: settings.alarm_type }
-        : undefined;
-      await scheduleForMedication(med, med.missed_window_minutes ?? settings.missed_window_minutes, alarm);
+      await scheduleForMedication(med, med.missed_window_minutes ?? settings.missed_window_minutes);
       router.back();
       enrichMedication(med.id, med.name, id).catch(() => {});
     } finally {

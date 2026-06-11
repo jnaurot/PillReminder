@@ -52,7 +52,9 @@ export async function logRefill(
 export async function getPrescriptions(medicationId: string): Promise<Prescription[]> {
   const db = getDb();
   return db.getAllAsync<Prescription>(
-    `SELECT * FROM prescriptions WHERE medication_id = ? ORDER BY refill_date DESC`,
+    `SELECT * FROM prescriptions
+     WHERE medication_id = ?
+     ORDER BY refill_date DESC, created_at DESC`,
     [medicationId]
   );
 }
@@ -60,7 +62,10 @@ export async function getPrescriptions(medicationId: string): Promise<Prescripti
 export async function getLatestPrescription(medicationId: string): Promise<Prescription | null> {
   const db = getDb();
   return db.getFirstAsync<Prescription>(
-    `SELECT * FROM prescriptions WHERE medication_id = ? ORDER BY refill_date DESC LIMIT 1`,
+    `SELECT * FROM prescriptions
+     WHERE medication_id = ?
+     ORDER BY refill_date DESC, created_at DESC
+     LIMIT 1`,
     [medicationId]
   );
 }
@@ -74,15 +79,17 @@ export async function getRefillStatus(
   medicationId: string,
   alertDays: number,
 ): Promise<RefillStatus | null> {
-  const rx = await getLatestPrescription(medicationId);
-  if (!rx) return null;
-
   const db = getDb();
+  const prescriptions = await getPrescriptions(medicationId);
+  if (prescriptions.length === 0) return null;
+  const rx = prescriptions[0];
+  const earliestRefillDate = prescriptions[prescriptions.length - 1].refill_date;
+  const totalUnitsSupplied = prescriptions.reduce((sum, refill) => sum + refill.quantity, 0);
 
   const row = await db.getFirstAsync<{ total: number }>(
     `SELECT COUNT(*) as total FROM dose_logs
      WHERE medication_id = ? AND skipped = 0 AND taken_at >= ?`,
-    [medicationId, rx.refill_date]
+    [medicationId, earliestRefillDate]
   );
   const dosesTaken = row?.total ?? 0;
 
@@ -92,7 +99,7 @@ export async function getRefillStatus(
   );
   const unitsPerDose = med?.pills_per_dose ?? 1;
   const unitsTaken = dosesTaken * unitsPerDose;
-  const unitsRemaining = Math.max(0, rx.quantity - unitsTaken);
+  const unitsRemaining = Math.max(0, totalUnitsSupplied - unitsTaken);
 
   let daysRemaining: number | null = null;
   if (rx.days_supply !== null) {

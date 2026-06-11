@@ -9,6 +9,11 @@ import { getAllDosesForDate, todayStr, type ScheduledDose, type EntityDoses } fr
 import { DoseCard } from '../src/components/DoseCard';
 import { setBadge } from '../src/notifications/scheduler';
 import { getActiveShift, type ShiftWithCaregiver } from '../src/db/caregivers';
+import {
+  buildDelegatedEntityIds,
+  locateDoseFocus,
+  summarizeTodaySections,
+} from '../src/screens/criticalFlows';
 
 type Section = EntityDoses & { data: ScheduledDose[] };
 
@@ -45,20 +50,10 @@ export default function TodayScreen() {
     setActiveShift(shift);
 
     // Build the set of entity IDs currently delegated to a caregiver.
-    if (shift) {
-      try {
-        const ids: string[] = JSON.parse(shift.entity_ids);
-        setDelegatedIds(ids.includes('*') ? new Set(all.map((e) => e.entityId)) : new Set(ids));
-      } catch {
-        setDelegatedIds(new Set());
-      }
-    } else {
-      setDelegatedIds(new Set());
-    }
+    setDelegatedIds(buildDelegatedEntityIds(shift, all));
 
     setLoading(false);
-    const actionableCount = all.flatMap((e) => e.doses)
-      .filter((d) => d.status === 'due' || d.status === 'missed').length;
+    const { actionableCount } = summarizeTodaySections(all);
     await setBadge(actionableCount);
   }, [date]);
 
@@ -76,22 +71,7 @@ export default function TodayScreen() {
     if (!focusTarget || sections.length === 0) return;
     if (!focusTarget.focusToken || handledFocusTokenRef.current === focusTarget.focusToken) return;
 
-    let found:
-      | { sectionIndex: number; itemIndex: number; key: string }
-      | null = null;
-
-    for (let sectionIndex = 0; sectionIndex < sections.length && !found; sectionIndex++) {
-      const items = sections[sectionIndex].data;
-      for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
-        const item = items[itemIndex];
-        const medMatches = item.medication.id === focusTarget.medId;
-        const scheduledMatches = !focusTarget.scheduledAt || item.scheduledAt === focusTarget.scheduledAt;
-        if (medMatches && scheduledMatches) {
-          found = { sectionIndex, itemIndex, key: item.key };
-          break;
-        }
-      }
-    }
+    const found = locateDoseFocus(sections, focusTarget);
 
     handledFocusTokenRef.current = focusTarget.focusToken;
     if (!found) return;
@@ -116,9 +96,7 @@ export default function TodayScreen() {
     setRefreshing(false);
   }
 
-  const allDoses = sections.flatMap((s) => s.doses);
-  const actionable = allDoses.filter((d) => d.status === 'due' || d.status === 'missed');
-  const settled    = allDoses.filter((d) => d.status === 'taken' || d.status === 'skipped');
+  const { allDoses, actionableCount, settledCount } = summarizeTodaySections(sections);
 
   const dateLabel = new Date().toLocaleDateString(undefined, {
     weekday: 'long', month: 'long', day: 'numeric',
@@ -177,12 +155,12 @@ export default function TodayScreen() {
       {allDoses.length > 0 && (
         <View style={[
           styles.summaryBanner,
-          actionable.length === 0 && styles.summaryBannerGreen,
+          actionableCount === 0 && styles.summaryBannerGreen,
         ]}>
-          {actionable.length > 0 ? (
+          {actionableCount > 0 ? (
             <Text style={styles.summaryText}>
-              {actionable.length} need{actionable.length === 1 ? 's' : ''} attention
-              {settled.length > 0 ? `  ·  ${settled.length} done` : ''}
+              {actionableCount} need{actionableCount === 1 ? 's' : ''} attention
+              {settledCount > 0 ? `  ·  ${settledCount} done` : ''}
             </Text>
           ) : (
             <Text style={[styles.summaryText, styles.summaryTextGreen]}>

@@ -42,21 +42,14 @@ React Native + Expo Router (file-based routing) medication reminder for family c
 - `index.ts` (legacy `registerRootComponent` entry point — conflicted with expo-router)
 - `App.tsx` (unused default component)
 
-### Native Android Alarm System (In Progress / Debugging)
-Custom Kotlin native modules for missed-dose alarms with full-screen activity + vibration:
+### Notification Model
+The app now uses Expo notifications only:
 
-| File | Purpose |
-|------|---------|
-| `AlarmSchedulerModule.kt` | Schedules/cancels `AlarmManager` alarms from JS |
-| `AlarmReceiver.kt` | Broadcast receiver: posts notification + starts foreground service |
-| `AlarmActivity.kt` | Full-screen activity with vibration + Dismiss button |
-| `AlarmVibrationService.kt` | Foreground service: persistent vibration + overlay + auto-stop |
+- One-shot dose reminders: `rem-{medId}-{date}-{HHmm}`
+- One-shot missed-dose alarms: `alarm-{medId}-{date}-{HHmm}`
+- Refill reminders: `refill-{medId}`
 
-**Current State:** Vibration fires but full-screen activity / notification are suppressed on ColorOS/Oppo devices. Work in progress.
-
-**Known Issue:** On ColorOS, `setFullScreenIntent()` and `startActivity()` from background are aggressively blocked by the OS. Foreground service notification also hidden. Requires user to manually whitelist in battery settings.
-
-**Auto-safety:** Service auto-stops after 60 seconds to prevent stuck vibration.
+Upcoming dose notifications are rebuilt from a notification pool rather than scheduled as repeating reminders plus native Android alarms.
 
 ### Production Build
 - EAS project configured: `projectId: 73247960-dbd6-4db0-b6ed-ecfe1b4cb1b2`
@@ -76,8 +69,9 @@ Custom Kotlin native modules for missed-dose alarms with full-screen activity + 
 3. After auth → `app/today.tsx` (schedule list)
 
 ### Database (`src/db/`)
-- Singleton SQLite instance, SCHEMA_VERSION = 10
+- Singleton SQLite instance, SCHEMA_VERSION = 13
 - Tables: `settings`, `entities`, `medications`, `prescriptions`, `dose_logs`, `caregivers`, `caregiver_shifts`, `native_alarms`
+  `native_alarms` is retained only for legacy migration compatibility and is no longer actively written by the app.
 - Migrations: try-catch `ALTER TABLE ADD COLUMN` for versions 6–10
 
 ### Dose Status Engine (`src/db/doseLogs.ts`)
@@ -86,10 +80,10 @@ Custom Kotlin native modules for missed-dose alarms with full-screen activity + 
 - Boundaries: earlyWindow=30min before, missedWindow=60min after
 
 ### Notifications (`src/notifications/`)
-- Repeating reminders: `rem-{medId}-{slot}`
-- Missed alerts: `miss-{medId}-{date}-{HHmm}`
+- Reminder notifications: `rem-{medId}-{date}-{HHmm}`
+- Missed-dose alarms: `alarm-{medId}-{date}-{HHmm}`
 - Refill reminders: `refill-{medId}`
-- Native alarms: `alarm-{medId}-{date}-{HHmm}` (Android-only, custom Kotlin)
+- Expo notification pool rebuilds upcoming dose slots on startup and foreground
 
 ### Caregiver Shift System (`src/messaging/`, `src/db/caregivers.ts`)
 - Shift lifecycle: `pending → confirmed → active → completed`
@@ -206,13 +200,8 @@ npx expo-doctor
 | `app/today.tsx` | Daily schedule with scrollable doses |
 | `src/db/database.ts` | SQLite singleton, SCHEMA_VERSION=10 |
 | `src/db/doseLogs.ts` | Dose status engine, scheduled dose generation |
-| `src/notifications/scheduler.ts` | Notification scheduling, native alarm bridge |
+| `src/notifications/scheduler.ts` | Notification pool rebuilds, routing, refill scheduling |
 | `src/notifications/permissions.ts` | Notification channel setup, permission requests |
-| `src/native/alarmScheduler.ts` | JS bridge to Kotlin `AlarmSchedulerModule` |
-| `android/app/src/main/java/.../AlarmSchedulerModule.kt` | Native alarm scheduler |
-| `android/app/src/main/java/.../AlarmReceiver.kt` | Alarm broadcast receiver |
-| `android/app/src/main/java/.../AlarmActivity.kt` | Full-screen alarm UI |
-| `android/app/src/main/java/.../AlarmVibrationService.kt` | Foreground vibration service |
 | `android/app/src/main/AndroidManifest.xml` | Permissions + activity/service declarations |
 
 
@@ -417,8 +406,6 @@ Build
   requirement. Everything in the administrative safeguards category is out of scope for a code-level fix —
   those require organizational processes, not features.
  
-
-
 
 
 

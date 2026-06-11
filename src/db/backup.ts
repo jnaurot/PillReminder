@@ -172,9 +172,29 @@ export async function importBackup(uri: string, password: string): Promise<Impor
 
     for (const r of backup.entities as any[]) {
       await db.runAsync(
-        `INSERT INTO entities (id, name, dob, notes, created_at, updated_at, deleted_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [r.id, r.name, r.dob ?? null, r.notes ?? null, r.created_at, r.updated_at, r.deleted_at ?? null],
+        `INSERT INTO entities
+         (id, name, dob, notes, created_at, updated_at, deleted_at, shift_source, shared_shift_id,
+          primary_phone, delegation_owner_device_id, delegation_imported_at, delegation_expires_at,
+          delegation_cleanup_pending, delegation_version, delegation_source_transfer_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          r.id,
+          r.name,
+          r.dob ?? null,
+          r.notes ?? null,
+          r.created_at,
+          r.updated_at,
+          r.deleted_at ?? null,
+          r.shift_source ?? 'local',
+          r.shared_shift_id ?? null,
+          r.primary_phone ?? null,
+          r.delegation_owner_device_id ?? null,
+          r.delegation_imported_at ?? null,
+          r.delegation_expires_at ?? null,
+          r.delegation_cleanup_pending ?? 0,
+          r.delegation_version ?? null,
+          r.delegation_source_transfer_id ?? null,
+        ],
       );
     }
 
@@ -182,16 +202,37 @@ export async function importBackup(uri: string, password: string): Promise<Impor
       await db.runAsync(
         `INSERT INTO medications
          (id, entity_id, name, dosage, pills_per_dose, schedule, food_requirement,
-          interactions, missed_policy, early_window_minutes, missed_window_minutes,
-          color, notes, created_at, updated_at, deleted_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [r.id, r.entity_id, r.name, r.dosage, r.pills_per_dose ?? 1,
-         r.schedule ?? '{"type":"fixed_times","times":[]}',
-         r.food_requirement ?? null, r.interactions ?? '[]',
-         r.missed_policy ?? null, r.early_window_minutes ?? null,
-         r.missed_window_minutes ?? null,
-         r.color ?? '#4A90D9', r.notes ?? null,
-         r.created_at, r.updated_at, r.deleted_at ?? null],
+          interactions, missed_policy, early_window_minutes, missed_window_minutes, color, notes,
+          rxcui, drug_info, pill_appearance, shared_shift_id, delegation_imported_at,
+          delegation_cleanup_pending, delegation_version, delegation_source_transfer_id,
+          created_at, updated_at, deleted_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          r.id,
+          r.entity_id,
+          r.name,
+          r.dosage,
+          r.pills_per_dose ?? 1,
+          r.schedule ?? '{"type":"fixed_times","times":[]}',
+          r.food_requirement ?? null,
+          r.interactions ?? '[]',
+          r.missed_policy ?? null,
+          r.early_window_minutes ?? null,
+          r.missed_window_minutes ?? null,
+          r.color ?? '#4A90D9',
+          r.notes ?? null,
+          r.rxcui ?? null,
+          r.drug_info ?? null,
+          r.pill_appearance ?? null,
+          r.shared_shift_id ?? null,
+          r.delegation_imported_at ?? null,
+          r.delegation_cleanup_pending ?? 0,
+          r.delegation_version ?? null,
+          r.delegation_source_transfer_id ?? null,
+          r.created_at,
+          r.updated_at,
+          r.deleted_at ?? null,
+        ],
       );
     }
 
@@ -207,11 +248,27 @@ export async function importBackup(uri: string, password: string): Promise<Impor
     for (const r of backup.dose_logs as any[]) {
       await db.runAsync(
         `INSERT INTO dose_logs
-         (id, medication_id, scheduled_at, taken_at, skipped, is_catchup, notes, caregiver_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [r.id, r.medication_id, r.scheduled_at, r.taken_at ?? null,
-         r.skipped ?? 0, r.is_catchup ?? 0, r.notes ?? null,
-         r.caregiver_id ?? null, r.created_at],
+         (id, medication_id, scheduled_at, taken_at, skipped, is_catchup, notes, caregiver_id,
+          protocol_event_id, protocol_shift_id, protocol_seq, protocol_sender_role,
+          protocol_recorded_at, protocol_applied_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          r.id,
+          r.medication_id,
+          r.scheduled_at,
+          r.taken_at ?? null,
+          r.skipped ?? 0,
+          r.is_catchup ?? 0,
+          r.notes ?? null,
+          r.caregiver_id ?? null,
+          r.protocol_event_id ?? null,
+          r.protocol_shift_id ?? null,
+          r.protocol_seq ?? null,
+          r.protocol_sender_role ?? null,
+          r.protocol_recorded_at ?? null,
+          r.protocol_applied_at ?? null,
+          r.created_at,
+        ],
       );
     }
 

@@ -43,6 +43,14 @@ export async function requestNotificationPermissions(): Promise<boolean> {
       sound: null,
       vibrationPattern: ALARM_VIBRATION,
     });
+    await Notifications.setNotificationChannelAsync('dose-alarm-silent-v3', {
+      name: 'Dose Alarms (Silent)',
+      importance: Notifications.AndroidImportance.MAX,
+      sound: null,
+      vibrationPattern: null,
+      enableLights: true,
+      lightColor: '#FF3B30',
+    });
   }
 
   const { status: existing } = await Notifications.getPermissionsAsync();

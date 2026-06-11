@@ -4,20 +4,13 @@ import { router } from 'expo-router';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { StatusBar } from 'expo-status-bar';
 import { consumePendingNotifRoute, consumePendingDeepLink, notifyAuthSuccess } from './_layout';
+import { resolvePostAuthRoute } from '../src/screens/criticalFlows';
 
 function navigateAfterAuth() {
   notifyAuthSuccess();
   const notifRoute = consumePendingNotifRoute();
   const deepLink = consumePendingDeepLink();
-
-  if (deepLink) {
-    // Deep link takes priority — go straight to the incoming screen.
-    router.replace(deepLink as any);
-  } else if (notifRoute) {
-    router.replace(notifRoute as any);
-  } else {
-    router.replace('/today');
-  }
+  router.replace(resolvePostAuthRoute(deepLink, notifRoute) as any);
 }
 
 export default function SplashScreen() {

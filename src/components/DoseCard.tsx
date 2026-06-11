@@ -14,9 +14,7 @@ import type { DoseLog } from '../types/index';
 import { parseSchedule, parseInteractions } from '../types/index';
 import type { MedicationInteraction } from '../types/index';
 import {
-  cancelMissedAlert,
-  cancelAlarmAlert,
-  dismissScheduledReminderForDose,
+  cancelDoseNotifications,
 } from '../notifications/scheduler';
 import { defaultTransport } from '../messaging/transport';
 import {
@@ -376,9 +374,7 @@ export function DoseCard({
     if (missed.length === 0 || policy === 'none') {
               const logs = await logDoseTaken(dose.medication.id, dose.scheduledAt);
               if (dose.scheduledAt) {
-                await dismissScheduledReminderForDose(dose.medication.id, dose.scheduledAt);
-                await cancelMissedAlert(dose.medication.id, dose.scheduledAt);
-                await cancelAlarmAlert(dose.medication.id, dose.scheduledAt);
+                await cancelDoseNotifications(dose.medication.id, dose.scheduledAt);
               }
       await maybeSendDoseEvents(logs.map((log) => ({
         log,
@@ -404,14 +400,10 @@ export function DoseCard({
                 missedDose.scheduledAt ?? undefined,
               );
               if (dose.scheduledAt) {
-                await dismissScheduledReminderForDose(dose.medication.id, dose.scheduledAt);
-                await cancelMissedAlert(dose.medication.id, dose.scheduledAt);
-                await cancelAlarmAlert(dose.medication.id, dose.scheduledAt);
+                await cancelDoseNotifications(dose.medication.id, dose.scheduledAt);
               }
               if (missedDose.scheduledAt) {
-                await dismissScheduledReminderForDose(dose.medication.id, missedDose.scheduledAt);
-                await cancelMissedAlert(dose.medication.id, missedDose.scheduledAt);
-                await cancelAlarmAlert(dose.medication.id, missedDose.scheduledAt);
+                await cancelDoseNotifications(dose.medication.id, missedDose.scheduledAt);
               }
               await maybeSendDoseEvents(logs.map((log) => ({
                 log,
@@ -438,14 +430,10 @@ export function DoseCard({
               const skippedLogs = await logDoseSkipped(dose.medication.id, missedDose.scheduledAt!);
               const takenLogs = await logDoseTaken(dose.medication.id, dose.scheduledAt);
               if (dose.scheduledAt) {
-                await dismissScheduledReminderForDose(dose.medication.id, dose.scheduledAt);
-                await cancelMissedAlert(dose.medication.id, dose.scheduledAt);
-                await cancelAlarmAlert(dose.medication.id, dose.scheduledAt);
+                await cancelDoseNotifications(dose.medication.id, dose.scheduledAt);
               }
               if (missedDose.scheduledAt) {
-                await dismissScheduledReminderForDose(dose.medication.id, missedDose.scheduledAt);
-                await cancelMissedAlert(dose.medication.id, missedDose.scheduledAt);
-                await cancelAlarmAlert(dose.medication.id, missedDose.scheduledAt);
+                await cancelDoseNotifications(dose.medication.id, missedDose.scheduledAt);
               }
               await maybeSendDoseEvents([
                 ...skippedLogs.map((log) => ({
@@ -478,9 +466,7 @@ export function DoseCard({
           style: 'destructive',
           onPress: async () => {
             const logs = await logDoseSkipped(dose.medication.id, dose.scheduledAt!);
-            await dismissScheduledReminderForDose(dose.medication.id, dose.scheduledAt!);
-            await cancelMissedAlert(dose.medication.id, dose.scheduledAt!);
-            await cancelAlarmAlert(dose.medication.id, dose.scheduledAt!);
+            await cancelDoseNotifications(dose.medication.id, dose.scheduledAt!);
             await maybeSendDoseEvents(logs.map((log) => ({
               log,
               eventType: 'dose_skipped' as const,

@@ -19,33 +19,16 @@ import {
   getShiftTransportContext,
   recordOutgoingRefillProtocolEvent,
 } from '../../../../../src/messaging/secureProtocol';
+import {
+  buildRefillHumanText,
+  computeSuggestedDays,
+  shouldOfferPrimaryRefillUpdate,
+} from '../../../../../src/screens/criticalFlows';
 import DateInput from '../../../../../src/components/DateInput';
-import { parseSchedule, type Medication } from '../../../../../src/types';
+import type { Medication } from '../../../../../src/types';
 import { scheduleRefillAlert } from '../../../../../src/notifications/scheduler';
 
 const UNITS = ['pills', 'capsules', 'mL', 'mg', 'patches', 'injections', 'puffs', 'drops', 'tablets'];
-
-function computeSuggestedDays(med: Medication, quantityStr: string): number | null {
-  const qty = parseInt(quantityStr, 10);
-  if (isNaN(qty) || qty < 1) return null;
-  const schedule = parseSchedule(med.schedule);
-  let dosesPerDay: number;
-  switch (schedule.type) {
-    case 'fixed_times':
-      dosesPerDay = schedule.times.length;
-      break;
-    case 'weekly':
-      dosesPerDay = (schedule.days.length * schedule.times.length) / 7;
-      break;
-    case 'monthly':
-      dosesPerDay = (schedule.days.length * schedule.times.length) / 30;
-      break;
-    default:
-      return null;
-  }
-  if (dosesPerDay <= 0) return null;
-  return Math.round(qty / (med.pills_per_dose * dosesPerDay));
-}
 
 export default function RefillScreen() {
   const { id, medId } = useLocalSearchParams<{ id: string; medId: string }>();
@@ -119,7 +102,7 @@ export default function RefillScreen() {
           primary_phone: string | null;
         }>('SELECT shift_source, shared_shift_id, primary_phone FROM entities WHERE id = ?', [medication.entity_id]);
 
-        if (entityRow?.shift_source === 'shared' && entityRow.primary_phone && entityRow.shared_shift_id) {
+        if (shouldOfferPrimaryRefillUpdate(entityRow)) {
           const primaryPhone = entityRow.primary_phone;
           const shiftId = entityRow.shared_shift_id;
           Alert.alert(
@@ -154,7 +137,7 @@ export default function RefillScreen() {
                     });
                     await defaultTransport.send({
                       phone: primaryPhone,
-                      humanText: `Refill logged: ${medication.name} — ${qty} ${unit}${ds ? `, ${ds}d supply` : ''}.`,
+                      humanText: buildRefillHumanText(medication.name, qty, unit, ds ?? null),
                       msg: envelope,
                     });
                     await recordOutgoingRefillProtocolEvent({

@@ -31,10 +31,7 @@ export default function EditMedicationScreen() {
       const updated = await getMedication(medId);
       if (updated) {
         const settings = await getSettings();
-        const alarm = settings.alarm_enabled
-          ? { delayMin: settings.alarm_delay_minutes, type: settings.alarm_type }
-          : undefined;
-        await scheduleForMedication(updated, updated.missed_window_minutes ?? settings.missed_window_minutes, alarm);
+        await scheduleForMedication(updated, updated.missed_window_minutes ?? settings.missed_window_minutes);
       }
       router.back();
       enrichMedication(medId, data.name, id).catch(() => {});

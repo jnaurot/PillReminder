@@ -21,6 +21,11 @@ import {
 } from '../../src/messaging/secureProtocol';
 import { getMedications } from '../../src/db/medications';
 import type { Entity } from '../../src/types/index';
+import {
+  entityLabelForShift,
+  getShiftEntityIds,
+  getShiftStatusPresentation,
+} from '../../src/screens/criticalFlows';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -32,31 +37,7 @@ function fmtDateTime(iso: string): string {
 }
 
 function entityLabel(shift: ShiftWithCaregiver, entities: Entity[]): string {
-  try {
-    const ids: string[] = JSON.parse(shift.entity_ids);
-    if (ids.includes('*') || ids.length === 0) return 'All patients';
-    return entities.filter((e) => ids.includes(e.id)).map((e) => e.name).join(', ') || 'All patients';
-  } catch {
-    return 'All patients';
-  }
-}
-
-// ─── Status chip ──────────────────────────────────────────────────────────────
-
-const STATUS_STYLE: Record<string, { bg: string; text: string; label: string }> = {
-  pending:   { bg: '#FFF7ED', text: '#C2410C', label: 'Awaiting confirmation' },
-  confirmed: { bg: '#EFF6FF', text: '#2563EB', label: 'Confirmed' },
-  active:    { bg: '#F0FDF4', text: '#16A34A', label: 'Active now' },
-  completed: { bg: '#F1F5F9', text: '#64748B', label: 'Completed' },
-  cancelled: { bg: '#FEF2F2', text: '#DC2626', label: 'Cancelled' },
-  return_sent: { bg: '#FEFCE8', text: '#A16207', label: 'Awaiting primary ack' },
-  return_pending_import: { bg: '#EFF6FF', text: '#1D4ED8', label: 'Importing return' },
-  awaiting_cleanup_ack: { bg: '#F1F5F9', text: '#64748B', label: 'Cleanup sent' },
-  rejected: { bg: '#FEF2F2', text: '#DC2626', label: 'Declined' },
-};
-
-function getShiftStatusPresentation(shift: ShiftWithCaregiver) {
-  return STATUS_STYLE[shift.protocol_state] ?? STATUS_STYLE[shift.resolvedStatus] ?? STATUS_STYLE.pending;
+  return entityLabelForShift(shift, entities) || 'All patients';
 }
 
 // ─── Shift card ───────────────────────────────────────────────────────────────
@@ -111,13 +92,9 @@ function ShiftCard({
 
   async function handleResendInvite() {
     try {
+      const delegatedIds = new Set(getShiftEntityIds(shift, entities));
       const delegated = entities.filter((entity) => {
-        try {
-          const ids = JSON.parse(shift.entity_ids) as string[];
-          return ids.includes('*') || ids.includes(entity.id);
-        } catch {
-          return true;
-        }
+        return delegatedIds.has(entity.id);
       });
       const medicationCount = (await Promise.all(
         delegated.map((entity) => getMedications(entity.id)),
