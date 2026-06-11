@@ -1,6 +1,7 @@
 import type { ShiftWithCaregiver } from '../db/caregivers';
 import type { EntityDoses, ScheduledDose } from '../db/doseLogs';
 import type { Medication, Entity } from '../types';
+import type { Prescription, RefillStatus } from '../db/prescriptions';
 import { parseSchedule } from '../types';
 
 export function computeSuggestedDays(med: Medication, quantityStr: string): number | null {
@@ -163,4 +164,39 @@ export function buildParsedDeepLinkPath(parsed: {
         .join('&')
     : '';
   return qs ? `/${parsed.path}?${qs}` : `/${parsed.path}`;
+}
+
+export function buildSupplyStatusLabel(
+  status: RefillStatus | null,
+  emptyLabel: string,
+): string {
+  if (!status) return emptyLabel;
+
+  const unit = status.prescription.unit ?? 'pills';
+  if (status.unitsRemaining !== null) {
+    return status.unitsRemaining <= 0
+      ? 'Refill needed'
+      : `${Math.max(0, status.unitsRemaining)} ${unit} estimated remaining`;
+  }
+
+  if (status.daysRemaining !== null) {
+    return status.daysRemaining <= 0
+      ? 'Refill needed'
+      : `${status.daysRemaining} day${status.daysRemaining === 1 ? '' : 's'} remaining`;
+  }
+
+  return emptyLabel;
+}
+
+export function buildSupplyStatusSub(
+  latestPrescription: Prescription | null,
+): string {
+  if (!latestPrescription) {
+    return 'No starting supply or refill has been logged yet.';
+  }
+
+  return (
+    `Latest entry: ${latestPrescription.quantity} ${latestPrescription.unit} logged on ` +
+    `${latestPrescription.refill_date}. Estimate reflects all logged supply entries and taken doses.`
+  );
 }

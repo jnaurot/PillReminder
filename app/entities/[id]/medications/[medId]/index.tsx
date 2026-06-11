@@ -11,6 +11,7 @@ import { getSettings } from '../../../../../src/db/settings';
 import { cancelForMedication } from '../../../../../src/notifications/scheduler';
 import { fetchPillImages } from '../../../../../src/services/rxnorm';
 import type { DrugInfo, Medication, PillAppearance, PillImage } from '../../../../../src/types';
+import { buildSupplyStatusLabel, buildSupplyStatusSub } from '../../../../../src/screens/criticalFlows';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -239,16 +240,8 @@ export default function MedicationDetailScreen() {
 
   const drugInfo = parseDrugInfo(med.drug_info);
   const appearance = parsePillAppearance(med.pill_appearance);
-  const stockLabel = refillStatus
-    ? refillStatus.daysRemaining !== null
-      ? (refillStatus.daysRemaining <= 0 ? 'Refill needed now' : `${refillStatus.daysRemaining} day${refillStatus.daysRemaining === 1 ? '' : 's'} remaining`)
-      : (refillStatus.unitsRemaining !== null
-        ? `${Math.max(0, refillStatus.unitsRemaining)} ${refillStatus.prescription.unit} estimated remaining`
-        : 'Supply available')
-    : 'Unknown supply';
-  const stockSub = latestPrescription
-    ? `Based on ${latestPrescription.quantity} ${latestPrescription.unit} logged on ${latestPrescription.refill_date}`
-    : 'No starting supply or refill has been logged yet.';
+  const stockLabel = buildSupplyStatusLabel(refillStatus, 'Unknown supply');
+  const stockSub = buildSupplyStatusSub(latestPrescription);
 
   return (
     <SafeAreaView style={s.container} edges={['top', 'bottom']}>

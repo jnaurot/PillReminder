@@ -1,4 +1,6 @@
 import {
+  buildSupplyStatusLabel,
+  buildSupplyStatusSub,
   buildDelegatedEntityIds,
   buildParsedDeepLinkPath,
   buildRefillHumanText,
@@ -145,5 +147,29 @@ describe('critical screen flows', () => {
     })).toBe('/caregivers/incoming?d=abc%20123&source=sms');
 
     expect(buildParsedDeepLinkPath({ path: null, queryParams: { d: 'abc' } })).toBeNull();
+  });
+
+  it('prefers cumulative units remaining over latest-entry days remaining for supply labels', () => {
+    const status = {
+      prescription: {
+        unit: 'pills',
+        quantity: 90,
+        refill_date: '2026-06-05',
+      },
+      unitsRemaining: 87,
+      daysRemaining: 84,
+    };
+
+    expect(buildSupplyStatusLabel(status as any, 'Unknown supply')).toBe('87 pills estimated remaining');
+    expect(buildSupplyStatusLabel(null, 'Unknown supply')).toBe('Unknown supply');
+  });
+
+  it('describes supply estimates as cumulative even when showing the latest logged entry', () => {
+    expect(buildSupplyStatusSub(null)).toBe('No starting supply or refill has been logged yet.');
+    expect(buildSupplyStatusSub({
+      quantity: 90,
+      unit: 'pills',
+      refill_date: '2026-06-05',
+    } as any)).toContain('Estimate reflects all logged supply entries and taken doses.');
   });
 });

@@ -12,6 +12,7 @@ import { getRefillStatus, type RefillStatus } from '../../../src/db/prescription
 import { cancelForMedication } from '../../../src/notifications/scheduler';
 import type { Entity, Medication, MedicationSchedule } from '../../../src/types';
 import { parseSchedule } from '../../../src/types';
+import { buildSupplyStatusLabel } from '../../../src/screens/criticalFlows';
 
 function ConfirmDeleteEntityModal({
   visible,
@@ -108,13 +109,10 @@ function formatScheduleSummary(scheduleJson: string): string {
 }
 
 function RefillBadge({ status }: { status: RefillStatus }) {
-  const { daysRemaining, unitsRemaining, isLow, prescription } = status;
-  const unit = prescription.unit ?? 'pills';
-  let label = '';
-  if (daysRemaining !== null) {
-    label = daysRemaining <= 0 ? 'Refill needed' : `${daysRemaining}d left`;
-  } else if (unitsRemaining !== null) {
-    label = unitsRemaining <= 0 ? 'Refill needed' : `~${unitsRemaining} ${unit} left`;
+  const { isLow } = status;
+  let label = buildSupplyStatusLabel(status, '');
+  if (label.endsWith(' estimated remaining')) {
+    label = label.replace(' estimated remaining', ' left');
   }
   if (!label) return null;
 
