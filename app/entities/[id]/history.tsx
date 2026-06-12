@@ -21,7 +21,7 @@ import {
 
 // ─── Component ─────────────────────────────────────────────────────────────
 
-export default function ScheduleScreen() {
+export default function HistoryScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const today = todayStr();
   const listRef = useRef<SectionList<SectionItem, ScheduleSection>>(null);
@@ -196,15 +196,6 @@ export default function ScheduleScreen() {
           </View>
         );
       }
-      if (section.isPast) {
-        return (
-          <View style={styles.retroFooter}>
-            <Text style={styles.retroText}>
-              Past date — doses recorded as taken at their scheduled time.
-            </Text>
-          </View>
-        );
-      }
       return null;
     },
     [],
@@ -219,7 +210,7 @@ export default function ScheduleScreen() {
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Text style={styles.backText}> ‹ Back</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Schedule</Text>
+        <Text style={styles.headerTitle}>History</Text>
         <View style={{ width: 60 }} />
       </View>
 
@@ -310,16 +301,6 @@ const styles = StyleSheet.create({
   },
   summaryText: { fontSize: 13, color: '#64748B', fontWeight: '500' },
   summaryTextGreen: { color: '#16A34A' },
-
-  retroFooter: {
-    backgroundColor: '#FFFBEB',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#FDE68A',
-    marginHorizontal: -16,
-  },
-  retroText: { fontSize: 12, color: '#92400E', textAlign: 'center' },
 
   loadMore: {
     flexDirection: 'row',
