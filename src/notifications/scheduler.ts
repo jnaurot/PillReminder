@@ -66,6 +66,10 @@ function startOfDay(date: Date): Date {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
 }
 
+function subtractMinutes(date: Date, minutes: number): Date {
+  return new Date(date.getTime() - minutes * 60000);
+}
+
 function alarmChannelForType(alarmType: string): string {
   switch (alarmType) {
     case 'sound':
@@ -196,7 +200,8 @@ function pushSlotIfUpcoming(
   end: Date,
   missedWindowMin: number,
 ): void {
-  if (candidate < from || candidate > end) return;
+  const alarmAt = new Date(candidate.getTime() + missedWindowMin * 60000);
+  if (candidate > end || alarmAt < from) return;
   slots.push({
     medId: med.id,
     medName: med.name,
@@ -253,6 +258,11 @@ export async function getUpcomingDoseSlots(from: Date, maxSlots: number): Promis
   ]);
 
   const end = addDays(from, UPCOMING_WINDOW_DAYS);
+  const maxMissedWindowMin = meds.reduce(
+    (max, med) => Math.max(max, med.missed_window_minutes ?? settings.missed_window_minutes),
+    0,
+  );
+  const lookbackStart = subtractMinutes(from, maxMissedWindowMin);
   const logs = await db.getAllAsync<{
     medication_id: string;
     scheduled_at: string;
@@ -267,7 +277,7 @@ export async function getUpcomingDoseSlots(from: Date, maxSlots: number): Promis
       medName: '',
       dosage: '',
       pillsPerDose: 0,
-      scheduledAt: from,
+      scheduledAt: lookbackStart,
       missedWindowMin: 0,
       color: '',
     }), `${dateToStr(end)}T23:59:59`],
@@ -299,10 +309,11 @@ export async function rebuildNotificationPool(): Promise<void> {
   if (!N) return;
 
   try {
+    const now = new Date();
     const [scheduled, settings, slots] = await Promise.all([
       N.getAllScheduledNotificationsAsync(),
       getSettings(),
-      getUpcomingDoseSlots(new Date(), Math.floor(POOL_BUDGET / 2)),
+      getUpcomingDoseSlots(now, Math.floor(POOL_BUDGET / 2)),
     ]);
 
     await Promise.all(
@@ -321,36 +332,40 @@ export async function rebuildNotificationPool(): Promise<void> {
       const alarmIdentifier = alarmId(slot.medId, dateStr, timeHHmm);
       const alarmAt = new Date(slot.scheduledAt.getTime() + slot.missedWindowMin * 60000);
 
-      await N.scheduleNotificationAsync({
-        identifier: reminderIdentifier,
-        content: {
-          title: `Time to take ${slot.medName}`,
-          body: `${slot.dosage} · ${slot.pillsPerDose} per dose`,
-          sound: true,
-          channelId: 'dose-reminders',
-          data: { medId: slot.medId, scheduledAt: scheduledAtStr, type: 'reminder' },
-        } as any,
-        trigger: {
-          type: N.SchedulableTriggerInputTypes.DATE,
-          date: slot.scheduledAt,
-        },
-      });
+      if (slot.scheduledAt >= now) {
+        await N.scheduleNotificationAsync({
+          identifier: reminderIdentifier,
+          content: {
+            title: `Time to take ${slot.medName}`,
+            body: `${slot.dosage} · ${slot.pillsPerDose} per dose`,
+            sound: true,
+            channelId: 'dose-reminders',
+            data: { medId: slot.medId, scheduledAt: scheduledAtStr, type: 'reminder' },
+          } as any,
+          trigger: {
+            type: N.SchedulableTriggerInputTypes.DATE,
+            date: slot.scheduledAt,
+          },
+        });
+      }
 
-      await N.scheduleNotificationAsync({
-        identifier: alarmIdentifier,
-        content: {
-          title: `Missed dose: ${slot.medName}`,
-          body: `${timeHHmm} dose has not been logged. Tap to open PillReminder.`,
-          priority: 'max',
-          sticky: true,
-          channelId: alarmChannelId,
-          data: { medId: slot.medId, scheduledAt: scheduledAtStr, type: 'alarm' },
-        } as any,
-        trigger: {
-          type: N.SchedulableTriggerInputTypes.DATE,
-          date: alarmAt,
-        },
-      });
+      if (alarmAt >= now) {
+        await N.scheduleNotificationAsync({
+          identifier: alarmIdentifier,
+          content: {
+            title: `Missed dose: ${slot.medName}`,
+            body: `${timeHHmm} dose has not been logged. Tap to open PillReminder.`,
+            priority: 'max',
+            sticky: true,
+            channelId: alarmChannelId,
+            data: { medId: slot.medId, scheduledAt: scheduledAtStr, type: 'alarm' },
+          } as any,
+          trigger: {
+            type: N.SchedulableTriggerInputTypes.DATE,
+            date: alarmAt,
+          },
+        });
+      }
     }
   } catch {}
 }
