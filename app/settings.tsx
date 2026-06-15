@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
   StyleSheet, ScrollView, Alert, ActivityIndicator,
-  KeyboardAvoidingView, Platform, Modal,
+  KeyboardAvoidingView, Platform, Modal, Linking,
 } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -11,6 +11,11 @@ import * as DocumentPicker from 'expo-document-picker';
 import { getSettings, setSetting, type AppSettings } from '../src/db/settings';
 import { exportCSV, exportBackup, importBackup } from '../src/db/backup';
 import { rescheduleAll } from '../src/notifications/scheduler';
+import {
+  getNotificationPermissionStatus,
+  requestNotificationPermissions,
+  type NotificationPermissionState,
+} from '../src/notifications/permissions';
 import { setFlagSecure as applyFlagSecure } from '../src/native/flagSecure';
 
 // ─── Password modal ───────────────────────────────────────────────────────────
@@ -170,21 +175,55 @@ export default function SettingsScreen() {
   const [inactivityTimeout, setInactivityTimeout] = useState(0);
   const [flagSecure, setFlagSecure] = useState(false);
   const [primaryName, setPrimaryName] = useState('Primary Caregiver');
+  const [notificationState, setNotificationState] = useState<NotificationPermissionState>('undetermined');
+  const [notificationBusy, setNotificationBusy] = useState(false);
 
   useEffect(() => {
-    getSettings().then((s) => {
-      setEarlyWindow(String(s.early_window_minutes));
-      setMissedWindow(String(s.missed_window_minutes));
-      setPolicy(s.global_missed_policy);
-      setRefillAlertDays(String(s.refill_alert_days));
-      setPrimaryPhone(s.primary_phone);
-      setAlarmType(s.alarm_type);
-      setInactivityTimeout(s.inactivity_timeout_minutes);
-      setFlagSecure(s.flag_secure);
-      setPrimaryName(s.primary_name);
-      setLoading(false);
-    });
+    Promise.all([getSettings(), getNotificationPermissionStatus()])
+      .then(([s, permission]) => {
+        setEarlyWindow(String(s.early_window_minutes));
+        setMissedWindow(String(s.missed_window_minutes));
+        setPolicy(s.global_missed_policy);
+        setRefillAlertDays(String(s.refill_alert_days));
+        setPrimaryPhone(s.primary_phone);
+        setAlarmType(s.alarm_type);
+        setInactivityTimeout(s.inactivity_timeout_minutes);
+        setFlagSecure(s.flag_secure);
+        setPrimaryName(s.primary_name);
+        setNotificationState(permission.state);
+        setLoading(false);
+      });
   }, []);
+
+  async function refreshNotificationState() {
+    const permission = await getNotificationPermissionStatus();
+    setNotificationState(permission.state);
+    return permission.state;
+  }
+
+  async function handleNotificationAccess() {
+    setNotificationBusy(true);
+    try {
+      const granted = await requestNotificationPermissions();
+      const state = await refreshNotificationState();
+      if (granted || state === 'granted') {
+        await rescheduleAll();
+        Alert.alert('Notifications enabled', 'Dose reminders and missed-dose alerts have been re-scheduled.');
+        return;
+      }
+
+      Alert.alert(
+        'Notifications are off',
+        'Android is blocking PillReminder notifications. Open system settings and allow notifications for this app.',
+        [
+          { text: 'Not now', style: 'cancel' },
+          { text: 'Open settings', onPress: () => { Linking.openSettings().catch(() => {}); } },
+        ],
+      );
+    } finally {
+      setNotificationBusy(false);
+    }
+  }
 
   async function handleSave() {
     const ew = parseInt(earlyWindow, 10);
@@ -280,6 +319,49 @@ export default function SettingsScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.form} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
+
+        <View style={styles.field}>
+          <Text style={styles.label}>Notifications</Text>
+          <Text style={styles.hint}>
+            Dose reminders and missed-dose alerts depend on Android notification permission.
+          </Text>
+          <View style={[
+            styles.statusCard,
+            notificationState === 'granted'
+              ? styles.statusCardGood
+              : notificationState === 'unavailable'
+                ? styles.statusCardNeutral
+                : styles.statusCardWarn,
+          ]}>
+            <Text style={styles.statusTitle}>
+              {notificationState === 'granted'
+                ? 'Notifications enabled'
+                : notificationState === 'unavailable'
+                  ? 'Notifications unavailable in Expo Go'
+                  : notificationState === 'undetermined'
+                    ? 'Notification permission not granted yet'
+                    : 'Notifications blocked by Android'}
+            </Text>
+            <Text style={styles.statusText}>
+              {notificationState === 'granted'
+                ? 'PillReminder can deliver dose reminders and missed-dose alerts on this device.'
+                : notificationState === 'unavailable'
+                  ? 'Install the app build on-device to receive notifications.'
+                  : notificationState === 'undetermined'
+                    ? 'Grant permission so PillReminder can deliver reminders and alarms.'
+                    : 'Use Android system settings to re-enable notifications for PillReminder.'}
+            </Text>
+          </View>
+          <TouchableOpacity
+            style={[styles.actionBtn, notificationBusy && styles.actionBtnDisabled]}
+            onPress={handleNotificationAccess}
+            disabled={notificationBusy || notificationState === 'unavailable'}
+          >
+            <Text style={styles.actionBtnText}>
+              {notificationState === 'granted' ? 'Re-check and re-schedule notifications' : 'Enable notifications'}
+            </Text>
+          </TouchableOpacity>
+        </View>
 
         <View style={styles.field}>
           <Text style={styles.label}>Auto-Lock</Text>
@@ -551,6 +633,28 @@ const styles = StyleSheet.create({
   policyLabel: { fontSize: 14, fontWeight: '600', color: '#1A2F5A' },
   policyLabelActive: { color: '#4A90D9' },
   policyDesc: { fontSize: 12, color: '#64748B', marginTop: 2 },
+  statusCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 14,
+    gap: 4,
+    backgroundColor: '#FFFFFF',
+  },
+  statusCardGood: { borderColor: '#BBF7D0', backgroundColor: '#F0FDF4' },
+  statusCardWarn: { borderColor: '#FED7AA', backgroundColor: '#FFF7ED' },
+  statusCardNeutral: { borderColor: '#CBD5E1', backgroundColor: '#F8FAFC' },
+  statusTitle: { fontSize: 14, fontWeight: '700', color: '#1A2F5A' },
+  statusText: { fontSize: 12, color: '#64748B' },
+  actionBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#4A90D9',
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+  },
+  actionBtnDisabled: { opacity: 0.5 },
+  actionBtnText: { fontSize: 14, fontWeight: '600', color: '#FFFFFF' },
   dataBtn: {
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: '#FFFFFF', borderRadius: 10,
