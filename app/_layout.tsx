@@ -153,7 +153,10 @@ export default function RootLayout() {
         listenerRef.current = N.addNotificationResponseReceivedListener(
           async (response) => {
             const notifId = response.notification.request.identifier;
-            if (notifId) await N.dismissNotificationAsync(notifId).catch(() => {});
+            const notifType = response.notification.request.content.data?.type;
+            if (notifId && notifType !== 'alarm') {
+              await N.dismissNotificationAsync(notifId).catch(() => {});
+            }
             const path = await (await import('../src/notifications/scheduler')).routeForDoseNotification(
               response.notification.request.identifier,
               response.notification.request.content.data as Record<string, unknown>,

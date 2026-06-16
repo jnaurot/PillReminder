@@ -206,9 +206,11 @@ export function DoseCard({
   const [showNoteModal, setShowNoteModal] = useState(false);
   const [showPrnTakeModal, setShowPrnTakeModal] = useState(false);
   const [prnEditLog, setPrnEditLog] = useState<DoseLog | null>(null);
+  const [isSettling, setIsSettling] = useState(false);
 
   const config  = STATUS_CONFIG[dose.status];
   const settled = dose.status === 'taken' || dose.status === 'skipped';
+  const displaySettled = settled || isSettling;
   const locked  = dose.status === 'locked';
   const food    = dose.medication.food_requirement;
   const isPrn   = parseSchedule(dose.medication.schedule).type === 'prn';
@@ -268,6 +270,17 @@ export function DoseCard({
   }
 
   // ── Take / Skip ──────────────────────────────────────────────────────────────
+
+  async function runSettlingAction(action: () => Promise<void>) {
+    if (isSettling) return;
+    setIsSettling(true);
+    try {
+      await action();
+    } catch (error) {
+      setIsSettling(false);
+      throw error;
+    }
+  }
 
   async function handleTake() {
     const warning = await checkInteractions(dose, allDoses);
@@ -375,16 +388,18 @@ export function DoseCard({
     );
 
     if (missed.length === 0 || policy === 'none') {
-              const logs = await logDoseTaken(dose.medication.id, dose.scheduledAt);
-              if (dose.scheduledAt) {
-                await cancelDoseNotifications(dose.medication.id, dose.scheduledAt);
-              }
-      await rescheduleAll();
-      await maybeSendDoseEvents(logs.map((log) => ({
-        log,
-        eventType: 'dose_taken' as const,
-        note: null,
-      })));
+      await runSettlingAction(async () => {
+        const logs = await logDoseTaken(dose.medication.id, dose.scheduledAt);
+        if (dose.scheduledAt) {
+          await cancelDoseNotifications(dose.medication.id, dose.scheduledAt);
+        }
+        await rescheduleAll();
+        await maybeSendDoseEvents(logs.map((log) => ({
+          log,
+          eventType: 'dose_taken' as const,
+          note: null,
+        })));
+      });
       return;
     }
 
@@ -399,22 +414,24 @@ export function DoseCard({
           {
             text: 'Take both',
             onPress: async () => {
-              const logs = await logDoseTaken(
-                dose.medication.id, dose.scheduledAt,
-                missedDose.scheduledAt ?? undefined,
-              );
-              if (dose.scheduledAt) {
-                await cancelDoseNotifications(dose.medication.id, dose.scheduledAt);
-              }
-              if (missedDose.scheduledAt) {
-                await cancelDoseNotifications(dose.medication.id, missedDose.scheduledAt);
-              }
-              await rescheduleAll();
-              await maybeSendDoseEvents(logs.map((log) => ({
-                log,
-                eventType: log.is_catchup ? 'dose_catchup' as const : 'dose_taken' as const,
-                note: log.notes ?? null,
-              })));
+              await runSettlingAction(async () => {
+                const logs = await logDoseTaken(
+                  dose.medication.id, dose.scheduledAt,
+                  missedDose.scheduledAt ?? undefined,
+                );
+                if (dose.scheduledAt) {
+                  await cancelDoseNotifications(dose.medication.id, dose.scheduledAt);
+                }
+                if (missedDose.scheduledAt) {
+                  await cancelDoseNotifications(dose.medication.id, missedDose.scheduledAt);
+                }
+                await rescheduleAll();
+                await maybeSendDoseEvents(logs.map((log) => ({
+                  log,
+                  eventType: log.is_catchup ? 'dose_catchup' as const : 'dose_taken' as const,
+                  note: log.notes ?? null,
+                })));
+              });
             },
           },
         ],
@@ -432,27 +449,29 @@ export function DoseCard({
             text: `Skip ${missedDose.timeLabel} dose`,
             style: 'destructive',
             onPress: async () => {
-              const skippedLogs = await logDoseSkipped(dose.medication.id, missedDose.scheduledAt!);
-              const takenLogs = await logDoseTaken(dose.medication.id, dose.scheduledAt);
-              if (dose.scheduledAt) {
-                await cancelDoseNotifications(dose.medication.id, dose.scheduledAt);
-              }
-              if (missedDose.scheduledAt) {
-                await cancelDoseNotifications(dose.medication.id, missedDose.scheduledAt);
-              }
-              await rescheduleAll();
-              await maybeSendDoseEvents([
-                ...skippedLogs.map((log) => ({
-                  log,
-                  eventType: 'dose_skipped' as const,
-                  note: null,
-                })),
-                ...takenLogs.map((log) => ({
-                  log,
-                  eventType: 'dose_taken' as const,
-                  note: null,
-                })),
-              ]);
+              await runSettlingAction(async () => {
+                const skippedLogs = await logDoseSkipped(dose.medication.id, missedDose.scheduledAt!);
+                const takenLogs = await logDoseTaken(dose.medication.id, dose.scheduledAt);
+                if (dose.scheduledAt) {
+                  await cancelDoseNotifications(dose.medication.id, dose.scheduledAt);
+                }
+                if (missedDose.scheduledAt) {
+                  await cancelDoseNotifications(dose.medication.id, missedDose.scheduledAt);
+                }
+                await rescheduleAll();
+                await maybeSendDoseEvents([
+                  ...skippedLogs.map((log) => ({
+                    log,
+                    eventType: 'dose_skipped' as const,
+                    note: null,
+                  })),
+                  ...takenLogs.map((log) => ({
+                    log,
+                    eventType: 'dose_taken' as const,
+                    note: null,
+                  })),
+                ]);
+              });
             },
           },
         ],
@@ -471,14 +490,16 @@ export function DoseCard({
           text: 'Skip',
           style: 'destructive',
           onPress: async () => {
-            const logs = await logDoseSkipped(dose.medication.id, dose.scheduledAt!);
-            await cancelDoseNotifications(dose.medication.id, dose.scheduledAt!);
-            await rescheduleAll();
-            await maybeSendDoseEvents(logs.map((log) => ({
-              log,
-              eventType: 'dose_skipped' as const,
-              note: null,
-            })));
+            await runSettlingAction(async () => {
+              const logs = await logDoseSkipped(dose.medication.id, dose.scheduledAt!);
+              await cancelDoseNotifications(dose.medication.id, dose.scheduledAt!);
+              await rescheduleAll();
+              await maybeSendDoseEvents(logs.map((log) => ({
+                log,
+                eventType: 'dose_skipped' as const,
+                note: null,
+              })));
+            });
           },
         },
       ],
@@ -549,13 +570,13 @@ export function DoseCard({
           <Text style={card.noteText}>📝 {dose.log.notes}</Text>
         ) : null}
 
-        {settled && (
+        {displaySettled && (
           <Text style={card.longPressHint}>Hold to add note or undo</Text>
         )}
 
         {isDelegated ? (
           <Text style={card.delegatedLabel}>🤝 Handled by caregiver</Text>
-        ) : !settled && !locked ? (
+        ) : !displaySettled && !locked ? (
           <View style={card.actions}>
             <TouchableOpacity style={card.takeBtn} onPress={handleTake}>
               <Text style={card.takeBtnText}>✓  Take</Text>

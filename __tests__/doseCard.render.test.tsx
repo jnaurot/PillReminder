@@ -92,6 +92,11 @@ describe('DoseCard render behavior', () => {
   it('renders due actions, opens medication details, and logs a take action', async () => {
     const onAction = jest.fn();
     let tree!: TestRenderer.ReactTestRenderer;
+    let resolveTake!: (value: any) => void;
+
+    (logDoseTaken as jest.Mock).mockImplementation(
+      () => new Promise((resolve) => { resolveTake = resolve; }),
+    );
 
     await act(async () => {
       tree = TestRenderer.create(
@@ -112,6 +117,26 @@ describe('DoseCard render behavior', () => {
 
     await act(async () => {
       findAncestorWithProp(findTextNode(tree.root, '✓  Take'), 'onPress').props.onPress();
+      await Promise.resolve();
+    });
+
+    expect(tree.root.findAll((node) => (node.type as any) === 'Text' && String(node.props.children).includes('✓  Take'))).toHaveLength(0);
+    expect(tree.root.findAll((node) => (node.type as any) === 'Text' && String(node.props.children).includes('Skip'))).toHaveLength(0);
+
+    await act(async () => {
+      resolveTake([
+        {
+          id: 'log-1',
+          medication_id: 'med-1',
+          scheduled_at: '2026-06-11T08:00:00',
+          taken_at: '2026-06-11T08:02:00',
+          skipped: 0,
+          is_catchup: 0,
+          notes: null,
+          caregiver_id: null,
+          created_at: '2026-06-11T08:02:00',
+        },
+      ]);
       await flushEffects();
     });
 
