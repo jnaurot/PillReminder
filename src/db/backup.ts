@@ -75,7 +75,7 @@ function todayTag(): string {
 
 // ─── CSV export ───────────────────────────────────────────────────────────────
 
-export async function exportCSV(): Promise<void> {
+export async function exportCSV(entityId: string | null = null): Promise<void> {
   const db = getDb();
   const rows = await db.getAllAsync<{
     person: string; medication: string; dosage: string;
@@ -88,8 +88,9 @@ export async function exportCSV(): Promise<void> {
     JOIN medications m ON dl.medication_id = m.id
     JOIN entities e ON m.entity_id = e.id
     WHERE e.deleted_at IS NULL AND m.deleted_at IS NULL
+      ${entityId ? 'AND e.id = ?' : ''}
     ORDER BY dl.scheduled_at DESC
-  `);
+  `, entityId ? [entityId] : []);
 
   const header = 'Person,Medication,Dosage,Scheduled At,Taken At,Skipped,Catch-up,Notes\n';
   const body = rows.map((r) => [

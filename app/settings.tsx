@@ -9,6 +9,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Constants from 'expo-constants';
 import * as DocumentPicker from 'expo-document-picker';
 import { getSettings, setSetting, type AppSettings } from '../src/db/settings';
+import { getEntities } from '../src/db/entities';
 import { exportCSV, exportBackup, importBackup } from '../src/db/backup';
 import { rescheduleAll } from '../src/notifications/scheduler';
 import {
@@ -17,6 +18,7 @@ import {
   type NotificationPermissionState,
 } from '../src/notifications/permissions';
 import { setFlagSecure as applyFlagSecure } from '../src/native/flagSecure';
+import type { Entity } from '../src/types';
 
 // ─── Password modal ───────────────────────────────────────────────────────────
 
@@ -177,10 +179,13 @@ export default function SettingsScreen() {
   const [primaryName, setPrimaryName] = useState('Primary Caregiver');
   const [notificationState, setNotificationState] = useState<NotificationPermissionState>('undetermined');
   const [notificationBusy, setNotificationBusy] = useState(false);
+  const [entities, setEntities] = useState<Entity[]>([]);
+  const [exportEntityId, setExportEntityId] = useState<string | null>(null);
+  const [showExportScopeModal, setShowExportScopeModal] = useState(false);
 
   useEffect(() => {
-    Promise.all([getSettings(), getNotificationPermissionStatus()])
-      .then(([s, permission]) => {
+    Promise.all([getSettings(), getNotificationPermissionStatus(), getEntities()])
+      .then(([s, permission, loadedEntities]) => {
         setEarlyWindow(String(s.early_window_minutes));
         setMissedWindow(String(s.missed_window_minutes));
         setPolicy(s.global_missed_policy);
@@ -191,6 +196,7 @@ export default function SettingsScreen() {
         setFlagSecure(s.flag_secure);
         setPrimaryName(s.primary_name);
         setNotificationState(permission.state);
+        setEntities(loadedEntities);
         setLoading(false);
       });
   }, []);
@@ -252,11 +258,15 @@ export default function SettingsScreen() {
 
   async function handleExportCSV() {
     try {
-      await exportCSV();
+      await exportCSV(exportEntityId);
     } catch (e: any) {
       Alert.alert('Export failed', e?.message ?? 'Could not export dose history.');
     }
   }
+
+  const selectedExportEntityName = exportEntityId
+    ? (entities.find((entity) => entity.id === exportEntityId)?.name ?? 'All users')
+    : 'All users';
 
   function handleExportBackup() {
     setShowExportModal(true);
@@ -533,13 +543,22 @@ export default function SettingsScreen() {
         <View style={styles.field}>
           <Text style={styles.label}>Data</Text>
 
-          <TouchableOpacity style={styles.dataBtn} onPress={handleExportCSV}>
-            <View style={styles.dataBtnInner}>
-              <Text style={styles.dataBtnTitle}>Export Dose History</Text>
-              <Text style={styles.dataBtnDesc}>CSV file — share with a doctor or spreadsheet</Text>
-            </View>
-            <Text style={styles.dataBtnArrow}>›</Text>
-          </TouchableOpacity>
+          <View style={styles.dataRow}>
+            <TouchableOpacity style={[styles.dataBtn, styles.dataBtnPrimary]} onPress={handleExportCSV}>
+              <View style={styles.dataBtnInner}>
+                <Text style={styles.dataBtnTitle}>Export Dose History</Text>
+                <Text style={styles.dataBtnDesc}>CSV file — share with a doctor or spreadsheet</Text>
+              </View>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.scopeBtn}
+              onPress={() => setShowExportScopeModal(true)}
+            >
+              <Text style={styles.scopeBtnLabel}>User</Text>
+              <Text style={styles.scopeBtnValue} numberOfLines={1}>{selectedExportEntityName}</Text>
+              <Text style={styles.scopeBtnChevron}>▼</Text>
+            </TouchableOpacity>
+          </View>
 
           <TouchableOpacity style={styles.dataBtn} onPress={handleExportBackup}>
             <View style={styles.dataBtnInner}>
@@ -575,6 +594,61 @@ export default function SettingsScreen() {
         onConfirm={handleImportWithPassword}
         onCancel={() => setShowImportModal(false)}
       />
+
+      <Modal
+        visible={showExportScopeModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowExportScopeModal(false)}
+      >
+        <View style={pm.backdrop}>
+          <TouchableOpacity
+            style={styles.scopeBackdrop}
+            activeOpacity={1}
+            onPress={() => setShowExportScopeModal(false)}
+          />
+          <View style={styles.scopeSheet}>
+            <Text style={styles.scopeSheetTitle}>Export Dose History</Text>
+            <Text style={styles.scopeSheetHint}>Choose which user's dose history to include.</Text>
+
+            <ScrollView style={styles.scopeList} contentContainerStyle={styles.scopeListContent}>
+              <TouchableOpacity
+                style={[styles.scopeOption, exportEntityId === null && styles.scopeOptionActive]}
+                onPress={() => {
+                  setExportEntityId(null);
+                  setShowExportScopeModal(false);
+                }}
+              >
+                <Text style={[styles.scopeOptionText, exportEntityId === null && styles.scopeOptionTextActive]}>
+                  All users
+                </Text>
+              </TouchableOpacity>
+
+              {entities.map((entity) => {
+                const active = exportEntityId === entity.id;
+                return (
+                  <TouchableOpacity
+                    key={entity.id}
+                    style={[styles.scopeOption, active && styles.scopeOptionActive]}
+                    onPress={() => {
+                      setExportEntityId(entity.id);
+                      setShowExportScopeModal(false);
+                    }}
+                  >
+                    <Text style={[styles.scopeOptionText, active && styles.scopeOptionTextActive]}>
+                      {entity.name}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+
+            <TouchableOpacity style={styles.scopeCloseBtn} onPress={() => setShowExportScopeModal(false)}>
+              <Text style={styles.scopeCloseBtnText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -655,6 +729,21 @@ const styles = StyleSheet.create({
   },
   actionBtnDisabled: { opacity: 0.5 },
   actionBtnText: { fontSize: 14, fontWeight: '600', color: '#FFFFFF' },
+  dataRow: { flexDirection: 'row', gap: 10, alignItems: 'stretch' },
+  dataBtnPrimary: { flex: 1 },
+  scopeBtn: {
+    width: 132,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    justifyContent: 'center',
+  },
+  scopeBtnLabel: { fontSize: 10, fontWeight: '700', color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 0.5 },
+  scopeBtnValue: { fontSize: 13, fontWeight: '600', color: '#1A2F5A', marginTop: 2 },
+  scopeBtnChevron: { fontSize: 11, color: '#94A3B8', marginTop: 6 },
   dataBtn: {
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: '#FFFFFF', borderRadius: 10,
@@ -667,4 +756,39 @@ const styles = StyleSheet.create({
   dataBtnDesc: { fontSize: 12, color: '#94A3B8', marginTop: 2 },
   dataBtnArrow: { fontSize: 20, color: '#CBD5E1', marginLeft: 8 },
   version: { fontSize: 12, color: '#64748B', textAlign: 'center', paddingVertical: 8 },
+  scopeBackdrop: { flex: 1 },
+  scopeSheet: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 32,
+    gap: 12,
+    maxHeight: '70%',
+  },
+  scopeSheetTitle: { fontSize: 17, fontWeight: '700', color: '#1A2F5A' },
+  scopeSheetHint: { fontSize: 12, color: '#64748B' },
+  scopeList: { maxHeight: 320 },
+  scopeListContent: { gap: 8 },
+  scopeOption: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  scopeOptionActive: { borderColor: '#4A90D9', backgroundColor: '#EEF6FF' },
+  scopeOptionText: { fontSize: 14, fontWeight: '600', color: '#1A2F5A' },
+  scopeOptionTextActive: { color: '#4A90D9' },
+  scopeCloseBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    paddingVertical: 12,
+  },
+  scopeCloseBtnText: { fontSize: 14, fontWeight: '600', color: '#64748B' },
 });
