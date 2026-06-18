@@ -41,7 +41,7 @@ Key modules:
 
 `doseLogs.ts` generates scheduled doses for a date by iterating medications and their schedule types (FixedTimes, PRN, Weekly, Monthly). Status values: `'locked' | 'upcoming' | 'due' | 'taken' | 'skipped' | 'missed'`. Status calculation uses the early window (before scheduled time) and missed window (too late to take) from settings.
 
-PRN (as-needed) medications have no scheduled time; doses are created on-demand when the user taps "Take PRN".
+PRN (as-needed) medications haven't a scheduled time; doses are created on-demand when the user taps "Take PRN".
 
 ### Notifications (`src/notifications/`)
 
